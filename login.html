@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Profilo • UniPass.me</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=Sora:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/css/style.css" />
+  </head>
+  <body class="login-page">
+    <div class="background-orbs" aria-hidden="true">
+      <span class="orb orb-one"></span>
+      <span class="orb orb-two"></span>
+      <span class="orb orb-three"></span>
+    </div>
+
+    <main class="login-shell">
+      <section class="login-card">
+        <a href="index.html" class="back-link">← Torna al tool</a>
+        <h1>Completa il tuo profilo</h1>
+        <p>
+          Registriamo solo le informazioni essenziali per personalizzare le
+          simulazioni. I dati restano sul tuo dispositivo.
+        </p>
+        <form id="login-form" autocomplete="on">
+          <div class="form-grid">
+            <label>
+              Nome
+              <input type="text" name="firstName" required />
+            </label>
+            <label>
+              Cognome
+              <input type="text" name="lastName" required />
+            </label>
+            <label>
+              Email istituzionale
+              <input type="email" name="email" required />
+            </label>
+            <label>
+              Nazionalità
+              <input type="text" name="nationality" required />
+            </label>
+            <label>
+              Corso desiderato
+              <input type="text" name="targetCourse" placeholder="Es. CLEAM" />
+            </label>
+            <label>
+              Numero di telefono
+              <input type="tel" name="phone" placeholder="(+39)" />
+            </label>
+            <label class="full-row">
+              Note personali
+              <textarea name="notes" rows="3" placeholder="Obiettivi, punti di forza..."></textarea>
+            </label>
+            <label class="consent full-row">
+              <input type="checkbox" name="consent" required />
+              Accetto l'uso dei dati per simulazioni locali.
+            </label>
+          </div>
+          <button type="submit" class="cta primary">Salva e torna al tool</button>
+          <p class="form-feedback" id="loginFeedback"></p>
+        </form>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        Tool indipendente dalla Bocconi. Le proiezioni non sostituiscono le
+        decisioni ufficiali di ammissione.
+      </p>
+    </footer>
+
+    <script src="assets/js/app.js" defer></script>
+  </body>
+</html>

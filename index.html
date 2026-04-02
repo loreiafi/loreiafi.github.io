@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UniPass.me</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=Sora:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/css/style.css" />
+  </head>
+  <body class="home-page">
+    <div class="background-orbs" aria-hidden="true">
+      <span class="orb orb-one"></span>
+      <span class="orb orb-two"></span>
+      <span class="orb orb-three"></span>
+    </div>
+
+    <header class="site-header">
+      <div class="brand">UniPass.me</div>
+      <nav class="site-nav">
+        <a href="#calculator">Ammission Calculator</a>
+        <a href="#metodo">Metodo</a>
+        <a href="#sessioni">Risultati sessioni</a>
+        <a href="login.html" class="pill-link">Profilo</a>
+      </nav>
+    </header>
+
+    <div class="gate-modal" id="resultsModal" aria-hidden="true">
+      <div class="gate-modal__panel" role="dialog" aria-modal="true" aria-labelledby="resultsModalTitle">
+        <p class="eyebrow">Nuova feature dati reali</p>
+        <h2 id="resultsModalTitle">Vuoi vedere i risultati delle sessioni d'ammissione?</h2>
+        <p>
+          Prima registriamo il tuo profilo d'ingresso. Cos&igrave; la dashboard resta protetta e mostrata
+          solo a chi condivide il proprio punteggio.
+        </p>
+        <div class="modal-actions">
+          <button class="cta primary" data-gate="confirm">Inserisco i miei dati</button>
+          <button class="cta ghost" data-gate="later">Magari pi&ugrave; tardi</button>
+        </div>
+      </div>
+    </div>
+
+    <main>
+      <section class="intro-section">
+        <div class="hero-copy">
+          <p class="eyebrow">Ammission Calculator</p>
+          <h1>Capisci subito se il tuo profilo apre le porte Bocconi</h1>
+          <p>
+            Inserisci media e score e ricevi in pochi secondi una risposta
+            chiara: sei già sopra le soglie storiche oppure hai margine di
+            miglioramento? Il calcolatore guida la tua prossima mossa con numeri
+            concreti e trasparenti.
+          </p>
+          <ul class="hero-benefits">
+            <li>Ponderazione reale: media 45% + score 55%</li>
+            <li>Confronto diretto con dati storici</li>
+          </ul>
+          <div class="hero-ctas">
+            <a href="#calculator-form" class="cta primary">Calcola subito</a>
+            <a href="#metodo" class="cta ghost">Scopri il metodo</a>
+          </div>
+          <div class="confidence-pill">
+            <span>Media 45%</span>
+            <span>Score 55%</span>
+            <span>Dati storici live</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="calculator-section" id="calculator">
+        <div class="panel-tool primary-tool">
+          <h2>Il tuo verdetto ora</h2>
+          <p class="tool-subcopy">
+            Inserisci i tuoi valori reali: l'Ammission Calculator restituisce
+            subito il risultato e i corsi in cui superi la soglia.
+          </p>
+          <form id="calculator-form" autocomplete="off">
+            <div class="form-field">
+              <label for="mediaInput">Media ponderata</label>
+              <input
+                type="number"
+                id="mediaInput"
+                name="media"
+                min="6"
+                max="10"
+                step="0.01"
+                value="6"
+                required
+              />
+              <small>Range atteso: 6 → 10</small>
+            </div>
+            <div class="form-field with-action">
+              <div class="field-heading">
+                <label for="scoreInput">Score test</label>
+                <button
+                  type="button"
+                  id="satButton"
+                  class="micro-btn"
+                  aria-label="Converti il punteggio SAT in score Bocconi"
+                >
+                  SAT
+                </button>
+              </div>
+              <input
+                type="number"
+                id="scoreInput"
+                name="score"
+                min="17"
+                max="50"
+                step="0.01"
+                value="17"
+                required
+              />
+              <small>Range atteso: 17 → 50 · Converti con SAT 1040-1600</small>
+            </div>
+            <div class="form-field inline">
+              <label for="courseSelect">Corso di riferimento</label>
+              <select id="courseSelect" name="course">
+                <option value="">Tutti i corsi</option>
+              </select>
+            </div>
+            <button type="submit" class="cta primary">Ottieni il responso</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="results-section" id="risultati">
+        <div class="results-card results-ensemble">
+          <div class="results-heading">
+            <p class="eyebrow">Esiti in tempo reale</p>
+            <h2>Quali corsi ti ammettono?</h2>
+          </div>
+          <div class="results-body">
+            <div id="results" class="results-output" aria-live="polite">
+              <p>Inserisci media e score per vedere subito l'esito.</p>
+            </div>
+            <div class="insight-stack" id="insightPanel">
+              <div class="score-pill">
+                <span>Indice di idoneità</span>
+                <strong id="heroScore">--%</strong>
+              </div>
+              <p class="score-status" id="scoreStatus">
+                Completa i campi per vedere il verdetto personalizzato.
+              </p>
+              <!--<p class="result-cutoff">Cut-off attuale: <span id="cutoffValue">--</span></p>-->
+              <div class="hero-card-bars compact">
+                <div>
+                  <span>Media</span>
+                  <div class="bar"><span id="heroMediaBar"></span></div>
+                </div>
+                <div>
+                  <span>Score</span>
+                  <div class="bar"><span id="heroScoreBar"></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="chart-section" id="dati">
+        <div class="chart-panel">
+          <div class="chart-heading">
+            <p class="eyebrow">Panoramica soglie</p>
+            <h2>Visualizza la combo media + score per corso</h2>
+            <p>
+              Ogni punto mostra la coppia minima media/score registrata nel CSV per i corsi
+              Bocconi. Usa il filtro per isolarne uno e capire se il tuo profilo batte quella
+              coordinata.
+            </p>
+          </div>
+          <div class="chart-toolbar">
+            <div class="form-field inline">
+              <label for="chartCourseSelect">Filtra corso</label>
+              <select id="chartCourseSelect" name="chart-course">
+                <option value="">Tutti i corsi</option>
+              </select>
+            </div>
+            <p id="chartCaption" class="chart-caption">
+              Nessun filtro applicato: visualizzi tutte le soglie storiche.
+            </p>
+          </div>
+          <div class="chart-canvas">
+            <canvas
+              id="admissionsChart"
+              aria-label="Grafico scatter delle soglie minime di media e score"
+              role="img"
+            ></canvas>
+          </div>
+        </div>
+      </section>
+
+      <section class="method-section" id="metodo">
+        <div class="method-header">
+          <p class="eyebrow">Metodo</p>
+          <h2>Perché l'Ammission Calculator funziona</h2>
+          <p>
+            Il focus è aiutarti a decidere con lucidità: traduciamo i tuoi numeri
+            nello stesso formato utilizzato dai corsi e li confrontiamo con le
+            soglie storiche per darti indicazioni pratiche e azionabili.
+          </p>
+        </div>
+        <div class="formula-card">
+          <h3>Modello matematico lineare</h3>
+          <p>
+            Normalizziamo ciascun indicatore con min–max e poi applichiamo i pesi
+            ufficiali. Nessun arrotondamento prima del confronto con il cut-off.
+          </p>
+          <ul>
+            <li>gpa_norm = (gpa − 6) / 4</li>
+            <li>test_norm = (test − 17) / 33</li>
+            <li>Score = 0.45 · gpa_norm + 0.55 · test_norm</li>
+            <li>Cut-off di ammissione: Score ≥ soglia minima del corso selezionato</li>
+          </ul>
+          <p class="formula-note">
+            Il risultato vive tra 0 e 1: 1 significa 10/50 perfetti, 0 coincide con
+            6/17. È algebra applicata, totalmente interpretabile.
+          </p>
+        </div>
+        <div class="method-grid">
+          <article class="method-card">
+            <h3>Normalizzazione intelligente</h3>
+            <p>
+              La tua media viene riallineata sul range ufficiale 6-10, lo score
+              sul range 17-50. Così confronti sempre mele con mele.
+            </p>
+          </article>
+          <article class="method-card">
+            <h3>Ponderazione reale 45/55</h3>
+            <p>
+              Media e score pesano in modo diverso nell'ammissione: il nostro
+              indice replica esattamente quella proporzione per un verdetto
+              credibile.
+            </p>
+          </article>
+          <article class="method-card">
+            <h3>Dati storici aggiornabili</h3>
+            <p>
+              Il CSV alimenta il sistema: se le soglie cambiano basta sostituire
+              il file per avere una lettura coerente con l'ultima sessione.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="session-section" id="sessioni">
+        <div class="session-heading">
+          <p class="eyebrow">Risultati sessioni</p>
+          <h2>Confronta il tuo profilo con chi ha gi&agrave; inviato i dati</h2>
+          <p>
+            Inserisci il tuo profilo reale: una volta validato puoi accedere alla dashboard moderna con i
+            dati degli altri candidati filtrati per corso e sessione.
+          </p>
+        </div>
+        <div class="session-grid">
+          <article class="session-card intake-card">
+            <h3>Porta d'ingresso ai dati</h3>
+            <p class="card-subcopy">Compila tutti i campi richiesti per sbloccare la dashboard.</p>
+            <form id="sessionForm" autocomplete="off">
+              <div class="form-field inline duo">
+                <div>
+                  <label for="firstName">Nome</label>
+                  <input type="text" id="firstName" name="firstName" required />
+                </div>
+                <div>
+                  <label for="lastName">Cognome</label>
+                  <input type="text" id="lastName" name="lastName" required />
+                </div>
+              </div>
+
+              <label class="checkbox-field">
+                <input type="checkbox" id="anonymity" name="anonymity" />
+                <span>Mostra il mio profilo come anonimo nella dashboard</span>
+              </label>
+
+              <div class="form-field inline duo">
+                <div>
+                  <label for="sessionSelect">Sessione</label>
+                  <select id="sessionSelect" name="session" required>
+                    <option value="">Seleziona</option>
+                    <option value="early">Early session</option>
+                    <option value="winter">Winter session</option>
+                    <option value="spring">Spring session</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="gpaInput">Media scolastica</label>
+                  <input
+                    type="number"
+                    id="gpaInput"
+                    name="gpa"
+                    min="6"
+                    max="10"
+                    step="0.01"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div class="form-field inline duo">
+                <div>
+                  <label for="scoreType">Tipologia punteggio</label>
+                  <select id="scoreType" name="scoreType" required>
+                    <option value="score">Score Bocconi</option>
+                    <option value="sat">SAT</option>
+                    <option value="act">ACT</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="scoreValue">Valore score / SAT / ACT</label>
+                  <input
+                    type="number"
+                    id="scoreValue"
+                    name="scoreValue"
+                    min="0"
+                    step="0.01"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div class="form-field">
+                <label for="coursePreferences">Corsi di preferenza</label>
+                <textarea
+                  id="coursePreferences"
+                  name="coursePreferences"
+                  rows="2"
+                  placeholder="Es. BIEM, CLEAM, BIEF"
+                  required
+                ></textarea>
+                <small>Inserisci i codici separati da virgola.</small>
+              </div>
+
+              <button type="submit" class="cta primary">Invia e sblocca la dashboard</button>
+              <p id="sessionMessage" class="form-feedback" role="status"></p>
+            </form>
+          </article>
+
+          <article class="session-card dashboard-card" id="sessionDashboard">
+            <div id="dashboardLocked" class="dashboard-locked">
+              <p>Dashboard protetta.</p>
+              <p>Compila il form a sinistra per vedere i risultati di tutti gli altri.</p>
+            </div>
+            <div id="dashboardBody" class="dashboard-body" hidden>
+              <div class="dashboard-meta">
+                <div>
+                  <p class="eyebrow">Snapshot</p>
+                  <h3>Overview community</h3>
+                </div>
+                <button type="button" class="micro-btn" id="refreshDashboard">Aggiorna dati</button>
+              </div>
+              <div id="sessionStats" class="session-stats"></div>
+              <div class="session-chart">
+                <canvas id="sessionChart" aria-label="Distribuzione punteggi utenti" role="img"></canvas>
+              </div>
+              <div id="sessionTable" class="session-table"></div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        Questo è un tool esterno alla Bocconi. I risultati sono proiezioni
+        basate su dati storici e <strong>non garantiscono l'ammissione</strong>.
+      </p>
+      <p>© 2026 UniPass.me • Insight-driven admissions helper.</p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js" defer></script>
+    <script>
+      window.SESSION_API_URL = "https://script.google.com/macros/s/AKfycbzP7buHDV5h0XjO50rEb0xMMhY5vqML1-R0OjbCvlvA7ekeyrNTwGRUi6V5jVpTBsNjzQ/exec";
+      window.SESSION_PROXY_URL = "https://cors.isomorphic-git.org/";
+    </script>
+    <script src="assets/js/app.js" defer></script>
+  </body>
+</html>
