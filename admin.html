@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin • UniPass.me</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=Sora:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/css/style.css" />
+  </head>
+  <body class="home-page admin-page">
+    <div class="background-orbs" aria-hidden="true">
+      <span class="orb orb-one"></span>
+      <span class="orb orb-two"></span>
+      <span class="orb orb-three"></span>
+    </div>
+
+    <header class="site-header">
+      <a href="index.html" class="brand">UniPass.me</a>
+      <nav class="site-nav" aria-label="Navigazione admin">
+        <a href="index.html">Tool</a>
+        <a href="login.html">Profilo</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="session-section" id="admin-area">
+        <div class="session-heading">
+          <p class="eyebrow">Admin</p>
+          <h2>Area riservata</h2>
+          <p>
+            Qui puoi vedere e modificare in modo permanente i dati caricati, sia
+            i record della porta d'ingresso ai dati sia i profili registrati.
+          </p>
+        </div>
+
+        <div class="session-grid">
+          <article class="session-card admin-card">
+            <div id="adminLocked" class="admin-locked">
+              <p class="eyebrow">Accesso protetto</p>
+              <h3>Sblocca l'area admin</h3>
+              <p>Inserisci la chiave privata per vedere i dati completi.</p>
+              <form id="adminUnlockForm" autocomplete="off">
+                <div class="form-field">
+                  <label for="adminAccessKey">Chiave admin</label>
+                  <input
+                    type="password"
+                    id="adminAccessKey"
+                    name="adminAccessKey"
+                    placeholder="Inserisci chiave"
+                    required
+                  />
+                </div>
+                <button type="submit" class="cta primary">Sblocca area admin</button>
+                <p id="adminMessage" class="form-feedback" role="status"></p>
+              </form>
+            </div>
+
+            <div id="adminBody" class="admin-body" hidden>
+              <div class="dashboard-meta">
+                <div>
+                  <p class="eyebrow">Admin</p>
+                  <h3>Dati completi</h3>
+                </div>
+                <button type="button" class="micro-btn" id="adminLogout">Blocca</button>
+              </div>
+
+              <section class="admin-block">
+                <h4>Porta d'ingresso ai dati</h4>
+                <p class="admin-subcopy">
+                  Modifica direttamente i record ricevuti dagli utenti. I cambi restano salvati in questo browser.
+                </p>
+                <div id="adminIntakeTable" class="admin-table"></div>
+              </section>
+
+              <section class="admin-block">
+                <h4>Profili registrati</h4>
+                <p class="admin-subcopy">
+                  Modifica i dati dei profili registrati localmente.
+                </p>
+                <div id="adminProfilesTable" class="admin-table"></div>
+              </section>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        Area privata locale. Le modifiche sono persistenti in questo browser tramite memoria locale.
+      </p>
+    </footer>
+
+    <script src="assets/js/app.js" defer></script>
+    <script>
+      window.SESSION_API_URL = "https://script.google.com/macros/s/AKfycbzP7buHDV5h0XjO50rEb0xMMhY5vqML1-R0OjbCvlvA7ekeyrNTwGRUi6V5jVpTBsNjzQ/exec";
+      window.SESSION_PROXY_URL = "https://cors.isomorphic-git.org/";
+      window.ADMIN_ACCESS_KEY = "b4dh6S%==lK9dk";
+    </script>
+  </body>
+</html>

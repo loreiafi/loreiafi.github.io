@@ -12,6 +12,11 @@ const SESSION_PROXY_URL =
   "https://cors.isomorphic-git.org/";
 const SUBMISSION_KEY = "bocconiSessionSubmission";
 const FINGERPRINT_KEY = "bocconiSessionFingerprint";
+const ADMIN_UNLOCK_KEY = "bocconiAdminUnlocked";
+const ADMIN_OVERRIDES_KEY = "bocconiAdminOverrides";
+const ADMIN_DELETED_KEY = "bocconiAdminDeleted";
+const ADMIN_ACCESS_KEY =
+  (typeof window !== "undefined" && window.ADMIN_ACCESS_KEY) || "";
 
 const state = {
   admissions: [],
@@ -20,6 +25,9 @@ const state = {
   chartFocus: "",
   candidatePoint: null,
   sessionData: [],
+  adminUnlocked: false,
+  adminOverrides: { intake: {}, profiles: {} },
+  adminDeleted: { intake: {}, profiles: {} },
   sessionChart: null,
   sessionSubmitted: false,
   sessionUserEntry: null,
@@ -30,10 +38,12 @@ document.addEventListener("DOMContentLoaded", () => {
   initMobileNavigation();
   initSessionSwitch();
   bootstrapSessionSubmissionFlag();
+  bootstrapAdminPersistence();
   hydrateCourseSelect();
   attachCalculator();
   attachSatButton();
   attachLoginForm();
+  initAdminModule();
   setupChartModule();
   loadAdmissions();
   initResultsModal();
@@ -697,7 +707,15 @@ function attachLoginForm() {
       return;
     }
 
+    const adminId = `profile-${Date.now()}`;
     localStorage.setItem("bocconiAccessProfile", JSON.stringify(data));
+    const existing = readStoredProfiles();
+    existing.push({
+      ...data,
+      __adminId: adminId,
+      timestamp: new Date().toISOString(),
+    });
+    localStorage.setItem("bocconiAccessProfiles", JSON.stringify(existing));
     feedback.textContent = "Profilo salvato in locale. Reindirizzamento...";
     form.classList.add("is-submitted");
 
@@ -705,6 +723,485 @@ function attachLoginForm() {
       window.location.href = "index.html";
     }, 1200);
   });
+}
+
+function initAdminModule() {
+  const unlockForm = document.getElementById("adminUnlockForm");
+  const logoutBtn = document.getElementById("adminLogout");
+  if (!unlockForm) return;
+
+  unlockForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const message = document.getElementById("adminMessage");
+    const input = document.getElementById("adminAccessKey");
+    const value = String(input?.value || "").trim();
+
+    if (!ADMIN_ACCESS_KEY || ADMIN_ACCESS_KEY === "cambia-questa-chiave-admin") {
+      if (message) {
+        message.textContent = "Configura prima window.ADMIN_ACCESS_KEY in index.html.";
+        message.classList.add("error");
+      }
+      return;
+    }
+
+    if (value !== ADMIN_ACCESS_KEY) {
+      if (message) {
+        message.textContent = "Chiave admin non valida.";
+        message.classList.add("error");
+      }
+      return;
+    }
+
+    state.adminUnlocked = true;
+    sessionStorage.setItem(ADMIN_UNLOCK_KEY, "1");
+    if (message) {
+      message.textContent = "Accesso admin effettuato.";
+      message.classList.remove("error");
+    }
+    renderAdminPanel();
+  });
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", () => {
+      state.adminUnlocked = false;
+      sessionStorage.removeItem(ADMIN_UNLOCK_KEY);
+      const input = document.getElementById("adminAccessKey");
+      if (input) input.value = "";
+      renderAdminPanel();
+    });
+  }
+
+  renderAdminPanel();
+  attachAdminEditors();
+}
+
+function bootstrapAdminPersistence() {
+  loadAdminOverrides();
+  loadAdminDeleted();
+  state.adminUnlocked = sessionStorage.getItem(ADMIN_UNLOCK_KEY) === "1";
+
+  window.addEventListener("storage", (event) => {
+    if (!event.key || ![ADMIN_OVERRIDES_KEY, ADMIN_DELETED_KEY, "bocconiAccessProfiles", "bocconiAccessProfile"].includes(event.key)) {
+      return;
+    }
+
+    loadAdminOverrides();
+    loadAdminDeleted();
+    if (state.sessionData.length) {
+      state.sessionData = getMergedAdminIntakeRows();
+      updateSessionDashboard();
+      renderAdminPanel();
+    }
+  });
+}
+
+function renderAdminPanel() {
+  const locked = document.getElementById("adminLocked");
+  const body = document.getElementById("adminBody");
+  if (!locked || !body) return;
+
+  if (!state.adminUnlocked) {
+    locked.style.display = "block";
+    body.hidden = true;
+    return;
+  }
+
+  locked.style.display = "none";
+  body.hidden = false;
+  renderAdminIntakeTable();
+  renderAdminProfilesTable();
+}
+
+function renderAdminIntakeTable() {
+  const container = document.getElementById("adminIntakeTable");
+  if (!container) return;
+  const rowsData = getMergedAdminIntakeRows();
+  if (!rowsData.length) {
+    container.innerHTML = "<p>Nessun dato intake disponibile.</p>";
+    return;
+  }
+
+  const rows = rowsData
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+    .map((entry) => {
+      const courses = escapeHtml((entry.courses || []).join(", "));
+      return `
+        <tr data-admin-row="${escapeHtml(entry.fingerprint || entry.id)}">
+          <td data-label="Nome"><input class="admin-cell-input" data-field="firstName" value="${escapeHtml(entry.firstName || "")}" /></td>
+          <td data-label="Cognome"><input class="admin-cell-input" data-field="lastName" value="${escapeHtml(entry.lastName || "")}" /></td>
+          <td data-label="Label"><input class="admin-cell-input" data-field="name" value="${escapeHtml(entry.name || "")}" /></td>
+          <td data-label="Anon"><label class="admin-check"><input type="checkbox" data-field="anon" ${entry.anon ? "checked" : ""} /></label></td>
+          <td data-label="Sessione">
+            <select class="admin-cell-input" data-field="session">
+              ${["early", "winter", "spring"].map((session) => `<option value="${session}" ${normalizeSession(entry.session) === session ? "selected" : ""}>${session}</option>`).join("")}
+            </select>
+          </td>
+          <td data-label="GPA"><input class="admin-cell-input" data-field="media" type="number" step="0.01" value="${Number(entry.media || 0).toFixed(2)}" /></td>
+          <td data-label="Tipo">
+            <select class="admin-cell-input" data-field="scoreType">
+              ${["score", "sat", "act"].map((type) => `<option value="${type}" ${String(entry.scoreType || "score") === type ? "selected" : ""}>${type}</option>`).join("")}
+            </select>
+          </td>
+          <td data-label="Raw"><input class="admin-cell-input" data-field="rawScore" type="number" step="0.01" value="${Number(entry.rawScore || 0).toFixed(2)}" /></td>
+          <td data-label="Score"><input class="admin-cell-input" data-field="bocconiScore" type="number" step="0.01" value="${Number(entry.bocconiScore || 0).toFixed(2)}" /></td>
+          <td data-label="Corsi"><input class="admin-cell-input" data-field="courses" value="${courses}" /></td>
+          <td data-label="Fingerprint"><input class="admin-cell-input" data-field="fingerprint" value="${escapeHtml(entry.fingerprint || "")}" /></td>
+          <td data-label="Timestamp"><input class="admin-cell-input" data-field="timestamp" value="${escapeHtml(entry.timestamp || "")}" /></td>
+          <td data-label="Azioni" class="admin-actions-cell">
+            <button type="button" class="micro-btn admin-save-row">💾</button>
+            <button type="button" class="micro-btn admin-reset-row">↩</button>
+            <button type="button" class="micro-btn admin-delete-row">❌</button>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Nome</th>
+            <th>Cognome</th>
+            <th>Label</th>
+            <th>Anon</th>
+            <th>Sessione</th>
+            <th>GPA</th>
+            <th>Tipo</th>
+            <th>Raw</th>
+            <th>Score</th>
+            <th>Corsi</th>
+            <th>Fingerprint</th>
+            <th>Timestamp</th>
+            <th>Azioni</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderAdminProfilesTable() {
+  const container = document.getElementById("adminProfilesTable");
+  if (!container) return;
+
+  const profiles = getMergedAdminProfiles();
+  if (!profiles.length) {
+    container.innerHTML = "<p>Nessun profilo registrato nel browser locale.</p>";
+    return;
+  }
+
+  const rows = profiles
+    .map((profile) => `
+      <tr data-admin-profile-row="${escapeHtml(profile.__adminId)}">
+        <td data-label="Nome"><input class="admin-cell-input" data-field="firstName" value="${escapeHtml(profile.firstName || "")}" /></td>
+        <td data-label="Cognome"><input class="admin-cell-input" data-field="lastName" value="${escapeHtml(profile.lastName || "")}" /></td>
+        <td data-label="Email"><input class="admin-cell-input" data-field="email" value="${escapeHtml(profile.email || "")}" /></td>
+        <td data-label="Nazionalita"><input class="admin-cell-input" data-field="nationality" value="${escapeHtml(profile.nationality || "")}" /></td>
+        <td data-label="Target"><input class="admin-cell-input" data-field="targetCourse" value="${escapeHtml(profile.targetCourse || "")}" /></td>
+        <td data-label="Telefono"><input class="admin-cell-input" data-field="phone" value="${escapeHtml(profile.phone || "")}" /></td>
+        <td data-label="Timestamp"><input class="admin-cell-input" data-field="timestamp" value="${escapeHtml(profile.timestamp || "")}" /></td>
+        <td data-label="Azioni" class="admin-actions-cell">
+          <button type="button" class="micro-btn admin-save-row">💾</button>
+          <button type="button" class="micro-btn admin-reset-row">↩</button>
+          <button type="button" class="micro-btn admin-delete-row">❌</button>
+        </td>
+      </tr>
+    `)
+    .join("");
+
+  container.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Nome</th>
+            <th>Cognome</th>
+            <th>Email</th>
+            <th>Nazionalita</th>
+            <th>Target</th>
+            <th>Telefono</th>
+            <th>Timestamp</th>
+            <th>Azioni</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function attachAdminEditors() {
+  const intakeContainer = document.getElementById("adminIntakeTable");
+  const profilesContainer = document.getElementById("adminProfilesTable");
+
+  const handleClick = (event) => {
+    const saveBtn = event.target.closest(".admin-save-row");
+    const resetBtn = event.target.closest(".admin-reset-row");
+    const deleteBtn = event.target.closest(".admin-delete-row");
+    const row = event.target.closest("tr");
+    if (!row) return;
+
+    if (saveBtn) {
+      if (row.closest("#adminIntakeTable")) {
+        saveAdminIntakeRow(row);
+      } else if (row.closest("#adminProfilesTable")) {
+        saveAdminProfileRow(row);
+      }
+      return;
+    }
+
+    if (resetBtn) {
+      if (row.closest("#adminIntakeTable")) {
+        resetAdminIntakeRow(row);
+      } else if (row.closest("#adminProfilesTable")) {
+        resetAdminProfileRow(row);
+      }
+      return;
+    }
+
+    if (deleteBtn) {
+      if (row.closest("#adminIntakeTable")) {
+        deleteAdminIntakeRow(row);
+      } else if (row.closest("#adminProfilesTable")) {
+        deleteAdminProfileRow(row);
+      }
+    }
+  };
+
+  intakeContainer?.addEventListener("click", handleClick);
+  profilesContainer?.addEventListener("click", handleClick);
+}
+
+function loadAdminOverrides() {
+  try {
+    const raw = localStorage.getItem(ADMIN_OVERRIDES_KEY);
+    if (!raw) {
+      state.adminOverrides = { intake: {}, profiles: {} };
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    state.adminOverrides = {
+      intake: parsed?.intake || {},
+      profiles: parsed?.profiles || {},
+    };
+  } catch (error) {
+    console.warn("Override admin non valide", error);
+    state.adminOverrides = { intake: {}, profiles: {} };
+  }
+}
+
+function loadAdminDeleted() {
+  try {
+    const raw = localStorage.getItem(ADMIN_DELETED_KEY);
+    if (!raw) {
+      state.adminDeleted = { intake: {}, profiles: {} };
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    state.adminDeleted = {
+      intake: parsed?.intake || {},
+      profiles: parsed?.profiles || {},
+    };
+  } catch (error) {
+    console.warn("Eliminazioni admin non valide", error);
+    state.adminDeleted = { intake: {}, profiles: {} };
+  }
+}
+
+function saveAdminOverrides() {
+  localStorage.setItem(ADMIN_OVERRIDES_KEY, JSON.stringify(state.adminOverrides));
+}
+
+function saveAdminDeleted() {
+  localStorage.setItem(ADMIN_DELETED_KEY, JSON.stringify(state.adminDeleted));
+}
+
+function getMergedAdminIntakeRows() {
+  const baseRows = Array.isArray(state.sessionData) ? state.sessionData : [];
+  return baseRows.map((row) => {
+    const key = row.fingerprint || row.id;
+    if (key && state.adminDeleted.intake[key]) {
+      return null;
+    }
+    const override = key ? state.adminOverrides.intake[key] : null;
+    return override ? { ...row, ...override } : row;
+  }).filter(Boolean);
+}
+
+function getMergedAdminProfiles() {
+  const baseProfiles = readStoredProfiles();
+  return baseProfiles.map((profile, index) => {
+    const adminId = profile.timestamp || profile.email || `${profile.firstName || "profile"}-${index}`;
+    if (state.adminDeleted.profiles[adminId]) {
+      return null;
+    }
+    const override = state.adminOverrides.profiles[adminId];
+    return {
+      ...profile,
+      __adminId: adminId,
+      ...(override || {}),
+    };
+  }).filter(Boolean);
+}
+
+function getRowFieldValue(row, field) {
+  const selector = `[data-field="${field}"]`;
+  const input = row.querySelector(selector);
+  if (!input) return "";
+  if (input.type === "checkbox") return input.checked;
+  return input.value;
+}
+
+function saveAdminIntakeRow(row) {
+  const id = row.dataset.adminRow;
+  if (!id) return;
+
+  const current = getMergedAdminIntakeRows().find((item) => (item.fingerprint || item.id) === id);
+  if (!current) return;
+
+  const updated = {
+    ...current,
+    firstName: getRowFieldValue(row, "firstName").trim(),
+    lastName: getRowFieldValue(row, "lastName").trim(),
+    name: getRowFieldValue(row, "name").trim(),
+    anon: Boolean(getRowFieldValue(row, "anon")),
+    session: normalizeSession(getRowFieldValue(row, "session")) || current.session,
+    media: parseFloat(getRowFieldValue(row, "media")) || 0,
+    scoreType: getRowFieldValue(row, "scoreType").trim() || current.scoreType,
+    rawScore: parseFloat(getRowFieldValue(row, "rawScore")) || 0,
+    bocconiScore: parseFloat(getRowFieldValue(row, "bocconiScore")) || 0,
+    courses: sanitizeCourses(getRowFieldValue(row, "courses")),
+    fingerprint: getRowFieldValue(row, "fingerprint").trim() || current.fingerprint,
+    timestamp: getRowFieldValue(row, "timestamp").trim() || current.timestamp,
+  };
+
+  state.adminOverrides.intake[id] = updated;
+  saveAdminOverrides();
+  state.sessionData = getMergedAdminIntakeRows();
+  renderAdminPanel();
+  updateSessionDashboard();
+}
+
+function resetAdminIntakeRow(row) {
+  const id = row.dataset.adminRow;
+  if (!id) return;
+  delete state.adminOverrides.intake[id];
+  saveAdminOverrides();
+  state.sessionData = getMergedAdminIntakeRows();
+  renderAdminPanel();
+  updateSessionDashboard();
+}
+
+function deleteAdminIntakeRow(row) {
+  const id = row.dataset.adminRow;
+  if (!id) return;
+  delete state.adminOverrides.intake[id];
+  state.adminDeleted.intake[id] = true;
+  saveAdminOverrides();
+  saveAdminDeleted();
+  state.sessionData = getMergedAdminIntakeRows();
+  renderAdminPanel();
+  updateSessionDashboard();
+}
+
+function saveAdminProfileRow(row) {
+  const id = row.dataset.adminProfileRow;
+  if (!id) return;
+
+  const updated = {
+    firstName: getRowFieldValue(row, "firstName").trim(),
+    lastName: getRowFieldValue(row, "lastName").trim(),
+    email: getRowFieldValue(row, "email").trim(),
+    nationality: getRowFieldValue(row, "nationality").trim(),
+    targetCourse: getRowFieldValue(row, "targetCourse").trim(),
+    phone: getRowFieldValue(row, "phone").trim(),
+    timestamp: getRowFieldValue(row, "timestamp").trim(),
+  };
+
+  state.adminOverrides.profiles[id] = updated;
+  saveAdminOverrides();
+  renderAdminPanel();
+}
+
+function resetAdminProfileRow(row) {
+  const id = row.dataset.adminProfileRow;
+  if (!id) return;
+  delete state.adminOverrides.profiles[id];
+  saveAdminOverrides();
+  renderAdminPanel();
+}
+
+function deleteAdminProfileRow(row) {
+  const id = row.dataset.adminProfileRow;
+  if (!id) return;
+
+  delete state.adminOverrides.profiles[id];
+  state.adminDeleted.profiles[id] = true;
+
+  const profiles = readStoredProfiles().filter((profile, index) => {
+    const profileId = profile.__adminId || profile.timestamp || profile.email || `${profile.firstName || "profile"}-${index}`;
+    return profileId !== id;
+  });
+
+  saveStoredProfiles(profiles);
+  saveAdminOverrides();
+  saveAdminDeleted();
+  renderAdminPanel();
+}
+
+function readStoredProfiles() {
+  const multi = localStorage.getItem("bocconiAccessProfiles");
+  if (multi) {
+    try {
+      const parsed = JSON.parse(multi);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((profile, index) => ({
+            ...profile,
+            __adminId: profile.__adminId || profile.timestamp || profile.email || `${profile.firstName || "profile"}-${index}`,
+          }))
+          .filter((profile) => !state.adminDeleted.profiles[profile.__adminId]);
+      }
+    } catch (error) {
+      console.warn("Profili multipli non validi", error);
+    }
+  }
+
+  const single = localStorage.getItem("bocconiAccessProfile");
+  if (!single) return [];
+  try {
+    const parsed = JSON.parse(single);
+    const profile = {
+      ...parsed,
+      __adminId: parsed.__adminId || parsed.timestamp || parsed.email || `${parsed.firstName || "profile"}-0`,
+    };
+    return state.adminDeleted.profiles[profile.__adminId] ? [] : [profile];
+  } catch (error) {
+    console.warn("Profilo singolo non valido", error);
+    return [];
+  }
+}
+
+function saveStoredProfiles(profiles) {
+  if (!Array.isArray(profiles) || profiles.length === 0) {
+    localStorage.removeItem("bocconiAccessProfiles");
+    localStorage.removeItem("bocconiAccessProfile");
+    return;
+  }
+
+  const payload = profiles.map((profile) => {
+    const { __adminId, ...rest } = profile;
+    return {
+      ...rest,
+      __adminId,
+    };
+  });
+
+  localStorage.setItem("bocconiAccessProfiles", JSON.stringify(payload));
+  localStorage.setItem("bocconiAccessProfile", JSON.stringify(payload[0]));
 }
 
 /* Session results logic */
@@ -766,6 +1263,7 @@ async function initSessionModule() {
   await hydrateFingerprint();
   await loadSessionData();
   updateSessionDashboard();
+  renderAdminPanel();
 }
 
 function attachDashboardRefresh() {
@@ -827,6 +1325,8 @@ async function loadSessionData() {
   }
 
   appendLocalSubmission();
+  state.sessionData = getMergedAdminIntakeRows();
+  renderAdminPanel();
   return state.sessionData;
 }
 
@@ -939,6 +1439,7 @@ function attachSessionForm() {
       }
       lockSessionForm(form);
       updateSessionDashboard();
+      renderAdminPanel();
     } catch (error) {
       if (feedback) {
         feedback.textContent = error.message;
