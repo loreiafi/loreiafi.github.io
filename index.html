@@ -21,14 +21,37 @@
     </div>
 
     <header class="site-header">
-      <div class="brand">UniPass.me</div>
-      <nav class="site-nav">
-        <a href="#calculator">Ammission Calculator</a>
+      <a href="#" class="brand" aria-label="Torna in alto">UniPass.me</a>
+      <button
+        class="nav-toggle"
+        id="navToggle"
+        type="button"
+        aria-label="Apri menu principale"
+        aria-controls="mobileNav"
+        aria-expanded="false"
+      >
+        <span></span><span></span><span></span>
+      </button>
+      <nav class="site-nav" aria-label="Navigazione principale desktop">
+        <a href="#calculator">Calculator</a>
+        <a href="#risultati">Risultati</a>
+        <a href="#dati">Soglie</a>
         <a href="#metodo">Metodo</a>
-        <a href="#sessioni">Risultati sessioni</a>
+        <a href="#sessioni">Sessioni</a>
         <a href="login.html" class="pill-link">Profilo</a>
       </nav>
     </header>
+
+    <div class="mobile-nav" id="mobileNav" aria-hidden="true">
+      <div class="mobile-nav__panel" role="dialog" aria-modal="true" aria-label="Menu mobile">
+        <a href="#calculator" class="mobile-nav__link">Calculator</a>
+        <a href="#risultati" class="mobile-nav__link">Risultati</a>
+        <a href="#dati" class="mobile-nav__link">Soglie</a>
+        <a href="#metodo" class="mobile-nav__link">Metodo</a>
+        <a href="#sessioni" class="mobile-nav__link">Sessioni</a>
+        <a href="login.html" class="mobile-nav__link mobile-nav__link--pill">Profilo</a>
+      </div>
+    </div>
 
     <div class="gate-modal" id="resultsModal" aria-hidden="true">
       <div class="gate-modal__panel" role="dialog" aria-modal="true" aria-labelledby="resultsModalTitle">
@@ -126,7 +149,12 @@
             </div>
             <div class="form-field inline">
               <label for="sessionFilterSelect">Sessione di applicazione</label>
-              <select id="sessionFilterSelect" name="sessionFilter" required>
+              <div class="session-switch" role="tablist" aria-label="Seleziona sessione">
+                <button type="button" class="session-chip is-active" data-session-choice="early">Early</button>
+                <button type="button" class="session-chip" data-session-choice="winter">Winter</button>
+                <button type="button" class="session-chip" data-session-choice="spring">Spring</button>
+              </div>
+              <select id="sessionFilterSelect" name="sessionFilter" required class="visually-hidden">
                 <option value="early" selected>Early</option>
                 <option value="winter">Winter</option>
                 <option value="spring">Spring</option>

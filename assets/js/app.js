@@ -27,6 +27,8 @@ const state = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  initMobileNavigation();
+  initSessionSwitch();
   bootstrapSessionSubmissionFlag();
   hydrateCourseSelect();
   attachCalculator();
@@ -37,6 +39,66 @@ document.addEventListener("DOMContentLoaded", () => {
   initResultsModal();
   initSessionModule();
 });
+
+function initMobileNavigation() {
+  const toggle = document.getElementById("navToggle");
+  const panel = document.getElementById("mobileNav");
+  if (!toggle || !panel) return;
+
+  const closeMenu = () => {
+    document.body.classList.remove("nav-open");
+    toggle.setAttribute("aria-expanded", "false");
+    panel.setAttribute("aria-hidden", "true");
+  };
+
+  toggle.addEventListener("click", () => {
+    const willOpen = !document.body.classList.contains("nav-open");
+    document.body.classList.toggle("nav-open", willOpen);
+    toggle.setAttribute("aria-expanded", String(willOpen));
+    panel.setAttribute("aria-hidden", String(!willOpen));
+  });
+
+  panel.addEventListener("click", (event) => {
+    if (event.target === panel || event.target.classList.contains("mobile-nav__link")) {
+      closeMenu();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeMenu();
+    }
+  });
+}
+
+function initSessionSwitch() {
+  const select = document.getElementById("sessionFilterSelect");
+  const chips = Array.from(document.querySelectorAll(".session-chip[data-session-choice]"));
+  if (!select || chips.length === 0) return;
+
+  const syncFromSelect = () => {
+    chips.forEach((chip) => {
+      const isActive = chip.dataset.sessionChoice === select.value;
+      chip.classList.toggle("is-active", isActive);
+      chip.setAttribute("aria-selected", String(isActive));
+    });
+  };
+
+  chips.forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const value = chip.dataset.sessionChoice;
+      if (!value) return;
+      select.value = value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      select.dispatchEvent(new Event("input", { bubbles: true }));
+      syncFromSelect();
+      updateCalculator();
+    });
+  });
+
+  select.addEventListener("change", syncFromSelect);
+  syncFromSelect();
+}
 
 function loadAdmissions() {
   fetch("data/admissions.csv")
