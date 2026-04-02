@@ -15,7 +15,7 @@ const FINGERPRINT_KEY = "bocconiSessionFingerprint";
 const ADMIN_UNLOCK_KEY = "bocconiAdminUnlocked";
 const ADMIN_OVERRIDES_KEY = "bocconiAdminOverrides";
 const ADMIN_DELETED_KEY = "bocconiAdminDeleted";
-const ADMIN_ACCESS_KEY = "bocconiciaociaoBUSu8DnmN"
+const ADMIN_ACCESS_KEY = 
   (typeof window !== "undefined" && window.ADMIN_ACCESS_KEY) || "";
 
 const state = {
