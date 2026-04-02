@@ -1,5 +1,9 @@
-BIEM,9.8,32.3
-BIEM,8.33,40.67
-CLEAM,7.1,41
-BIEF,9.7,33.6
-BIEF,9.5,29
+BIEM,early,9.5,29.2
+BIEM,winter,9.3,31.0
+BIEM,spring,9.1,33.5
+CLEAM,early,7.75,35.60
+CLEAM,winter,8.0,37.2
+CLEAM,spring,8.2,39.1
+BIEF,early,8.9,36.5
+BIEF,winter,9.2,38.0
+BIEF,spring,9.4,40.0

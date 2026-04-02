@@ -65,32 +65,44 @@ function loadAdmissions() {
 }
 
 function parseCsv(text) {
-  return text
-    .trim()
-    .split(/\r?\n/)
-    .slice(1)
-    .filter(Boolean)
-    .map((line) => {
-      const [course, minMedia, minScore] = line.split(",").map((chunk) => chunk.trim());
-      return {
-        course,
-        minMedia: parseFloat(minMedia),
-        minScore: parseFloat(minScore),
-      };
-    });
+  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length === 0) return [];
+
+  const headers = lines[0].split(",").map((chunk) => chunk.trim().toLowerCase());
+
+  return lines.slice(1).map((line) => {
+    const values = line.split(",").map((chunk) => chunk.trim());
+    const row = headers.reduce((acc, header, index) => {
+      acc[header] = values[index] ?? "";
+      return acc;
+    }, {});
+
+    const course = row.course || row.courses || "";
+    const session = normalizeSession(row.session) || "early";
+    const minMedia = parseFloat(row.min_media ?? row.minmedia ?? row.media ?? row.gpa);
+    const minScore = parseFloat(row.min_score ?? row.minscore ?? row.score);
+
+    return {
+      course,
+      session,
+      minMedia,
+      minScore,
+    };
+  }).filter((row) => row.course && Number.isFinite(row.minMedia) && Number.isFinite(row.minScore));
 }
 
 function hydrateCourseSelect(data = []) {
   const selectIds = ["courseSelect", "chartCourseSelect"];
+  const uniqueCourses = [...new Set(data.map((row) => row.course).filter(Boolean))];
   selectIds.forEach((id) => {
     const select = document.getElementById(id);
     if (!select) return;
     select.innerHTML = '<option value="">Tutti i corsi</option>';
-    if (data.length === 0) return;
-    data.forEach((row) => {
+    if (uniqueCourses.length === 0) return;
+    uniqueCourses.forEach((course) => {
       const option = document.createElement("option");
-      option.value = row.course;
-      option.textContent = row.course;
+      option.value = course;
+      option.textContent = course;
       select.appendChild(option);
     });
   });
@@ -113,6 +125,19 @@ function attachCalculator() {
   });
 
   updateCalculator();
+}
+
+function normalizeSession(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["early", "winter", "spring"].includes(normalized)) {
+    return normalized;
+  }
+  return "";
+}
+
+function getSelectedSession() {
+  const sessionSelect = document.getElementById("sessionFilterSelect");
+  return normalizeSession(sessionSelect?.value) || "early";
 }
 
 function attachSatButton() {
@@ -149,6 +174,7 @@ function updateCalculator(event) {
   const mediaField = document.getElementById("mediaInput");
   const scoreField = document.getElementById("scoreInput");
   const select = document.getElementById("courseSelect");
+  const session = getSelectedSession();
   if (!form || !mediaField || !scoreField) return;
 
   const media = parseFloat(mediaField.value);
@@ -165,19 +191,19 @@ function updateCalculator(event) {
   const normalizedMedia = normalize(media, MEDIA_RANGE);
   const normalizedScore = normalize(score, SCORE_RANGE);
   const weightedIndex = normalizedMedia * WEIGHTS.media + normalizedScore * WEIGHTS.score;
-  const cutoffScore = getDynamicCutoff(focusCourse);
+  const cutoffScore = getDynamicCutoff(focusCourse, session);
   const hasCutoff = typeof cutoffScore === "number";
   const isAdmitted = hasCutoff && weightedIndex >= cutoffScore;
 
-  const admittedCourses = filterAdmissions(weightedIndex, focusCourse);
+  const admittedCourses = filterAdmissions(weightedIndex, focusCourse, session);
   const heroPercent = (weightedIndex * 100).toFixed(1);
   const cutoffPercent = hasCutoff ? (cutoffScore * 100).toFixed(1) : null;
 
-  const listHtml = buildCourseList(admittedCourses, focusCourse, weightedIndex);
+  const listHtml = buildCourseList(admittedCourses, focusCourse, session, weightedIndex);
   const statusCopy = hasCutoff
     ? isAdmitted
-      ? `Indice ${heroPercent}% ≥ ${cutoffPercent}%: profilo sopra soglia.`
-      : `Indice ${heroPercent}% < ${cutoffPercent}%: lavora su media o score.`
+      ? `Sessione ${session}: indice ${heroPercent}% ≥ ${cutoffPercent}%, profilo sopra soglia.`
+      : `Sessione ${session}: indice ${heroPercent}% < ${cutoffPercent}%, lavora su media o score.`
     : "Carica i dati di ammissione per confrontare il tuo indice con la soglia minima.";
 
   setResultsHtml(listHtml);
@@ -185,7 +211,7 @@ function updateCalculator(event) {
   updateCandidatePlot(media, score);
 }
 
-function filterAdmissions(candidateScore, focusCourse) {
+function filterAdmissions(candidateScore, focusCourse, session = "") {
   if (!state.ready || state.admissions.length === 0) return [];
 
   return state.admissions
@@ -194,12 +220,13 @@ function filterAdmissions(candidateScore, focusCourse) {
       return { ...row, requiredScore };
     })
     .filter((row) => {
+      if (session && normalizeSession(row.session) !== session) return false;
       if (focusCourse && row.course !== focusCourse) return false;
       return candidateScore >= row.requiredScore;
     });
 }
 
-function buildCourseList(courses, focusCourse, candidateScore) {
+function buildCourseList(courses, focusCourse, session, candidateScore) {
   if (!state.ready) {
     return "<p>Caricamento soglie in corso...</p>";
   }
@@ -208,7 +235,7 @@ function buildCourseList(courses, focusCourse, candidateScore) {
     const courseMsg = focusCourse
       ? `per ${focusCourse}`
       : "per i corsi disponibili";
-    return `<p class="result-empty">Ancora nessun corso ammissibile ${courseMsg}. Migliora il punteggio combinato e l'Ammission Calculator aggiornerà il responso.</p>`;
+    return `<p class="result-empty">Ancora nessun corso ammissibile ${courseMsg} nella sessione ${session}. Migliora il punteggio combinato e l'Ammission Calculator aggiornerà il responso.</p>`;
   }
 
   const items = courses
@@ -290,7 +317,7 @@ function computeScoreValue(mediaValue, scoreValue) {
   return mediaNorm * WEIGHTS.media + scoreNorm * WEIGHTS.score;
 }
 
-function getDynamicCutoff(focusCourse = "") {
+function getDynamicCutoff(focusCourse = "", session = "") {
   if (!state.ready || state.admissions.length === 0) {
     return null;
   }
@@ -299,7 +326,15 @@ function getDynamicCutoff(focusCourse = "") {
     ? state.admissions.filter((row) => row.course === focusCourse)
     : state.admissions;
 
-  const universe = filtered.length > 0 ? filtered : state.admissions;
+  const sessionFiltered = session
+    ? filtered.filter((row) => normalizeSession(row.session) === session)
+    : filtered;
+
+  const universe = session ? sessionFiltered : filtered;
+
+  if (universe.length === 0) {
+    return null;
+  }
 
   const values = universe
     .map((row) => computeScoreValue(row.minMedia, row.minScore))
@@ -321,6 +356,14 @@ function setupChartModule() {
   if (select) {
     select.addEventListener("change", (event) => {
       state.chartFocus = event.target.value;
+      updateChartCaption(state.chartFocus);
+      renderAdmissionsChart();
+    });
+  }
+
+  const sessionSelect = document.getElementById("sessionFilterSelect");
+  if (sessionSelect) {
+    sessionSelect.addEventListener("change", () => {
       updateChartCaption(state.chartFocus);
       renderAdmissionsChart();
     });
@@ -448,6 +491,10 @@ function renderAdmissionsChart() {
   const scatterDataset = state.chart.data.datasets[0];
   const isoDataset = state.chart.data.datasets[1];
   const candidateDataset = state.chart.data.datasets[2];
+  const selectedSession = getSelectedSession();
+  const admissions = state.ready
+    ? state.admissions.filter((row) => normalizeSession(row.session) === selectedSession)
+    : [];
 
   if (!state.ready) {
     scatterDataset.data = [];
@@ -461,17 +508,17 @@ function renderAdmissionsChart() {
   }
 
   if (!state.chartFocus) {
-    scatterDataset.data = state.admissions.map((row) => ({
+    scatterDataset.data = admissions.map((row) => ({
       x: row.minScore,
       y: row.minMedia,
       course: row.course,
     }));
 
     const isoSeries = [];
-    state.admissions.forEach((row, idx) => {
+    admissions.forEach((row, idx) => {
       const series = buildIsoSeries(row, row.course);
       isoSeries.push(...series);
-      if (idx < state.admissions.length - 1) {
+      if (idx < admissions.length - 1) {
         isoSeries.push({ x: null, y: null });
       }
     });
@@ -485,7 +532,7 @@ function renderAdmissionsChart() {
     return;
   }
 
-  const targetRow = state.admissions.find((row) => row.course === state.chartFocus);
+  const targetRow = admissions.find((row) => row.course === state.chartFocus);
   if (!targetRow) {
     scatterDataset.data = [];
     isoDataset.data = [];
@@ -545,9 +592,10 @@ function solveScoreForMedia(mediaValue, targetScore) {
 function updateChartCaption(courseName) {
   const caption = document.getElementById("chartCaption");
   if (!caption) return;
+  const session = getSelectedSession();
   caption.textContent = courseName
-    ? `Filtro attivo su ${courseName}: vedi il punto storico e la linea di combinazioni equivalenti media + score.`
-    : "Nessun filtro applicato: visualizzi tutte le soglie storiche.";
+    ? `Sessione ${session} e filtro su ${courseName}: vedi il punto storico e la linea di combinazioni equivalenti media + score.`
+    : `Sessione ${session} attiva: visualizzi tutte le soglie storiche di questa sessione.`;
 }
 
 function updateCandidatePlot(mediaValue, scoreValue) {
