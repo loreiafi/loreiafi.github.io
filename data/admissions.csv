@@ -1,10 +1,7 @@
 course,session,min_media,min_score
-BIEM,winter,9.5,29.2
-CLEAM,winter,7.75,35.60
-BIEF,winter,8.9,36.5
-BIEM,early,9.5,33
-CLEAM,early,7.75,37
-BIEF,early,8.9,38
-BIEM,spring,9.5,36
-CLEAM,spring,7.75,39
-BIEF,spring,8.9,38
+BIEM,early,9.5,29.2
+CLEAM,early,7.75,35.60
+BIEF,early,8.9,36.5
+BIEM,winter,7.9, 40.07
+CLEAM,winter,8,29.93
+BIEF,winter,8,44
