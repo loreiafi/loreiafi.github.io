@@ -20,9 +20,11 @@ const ADMIN_ACCESS_KEY =
 
 const state = {
   admissions: [],
+  courseBoundaries: [],
   ready: false,
   chart: null,
   chartFocus: "",
+  showRejectedAdmissions: false,
   candidatePoint: null,
   sessionData: [],
   adminUnlocked: false,
@@ -120,6 +122,7 @@ function loadAdmissions() {
     })
     .then((text) => {
       state.admissions = parseCsv(text);
+      state.courseBoundaries = buildCourseBoundaries(state.admissions);
       state.ready = true;
       hydrateCourseSelect(state.admissions);
       const chartSelect = document.getElementById("chartCourseSelect");
@@ -153,14 +156,34 @@ function parseCsv(text) {
     const session = normalizeSession(row.session) || "early";
     const minMedia = parseFloat(row.min_media ?? row.minmedia ?? row.media ?? row.gpa);
     const minScore = parseFloat(row.min_score ?? row.minscore ?? row.score);
+    const admitted = normalizeAdmissionStatus(row.admitted ?? row.status ?? row.esito ?? row.decision);
 
     return {
       course,
       session,
       minMedia,
       minScore,
+      admitted,
     };
   }).filter((row) => row.course && Number.isFinite(row.minMedia) && Number.isFinite(row.minScore));
+}
+
+function normalizeAdmissionStatus(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+
+  if (["ammesso", "ammessa", "admitted", "yes", "si", "true", "1", "pass"].includes(normalized)) {
+    return "admitted";
+  }
+
+  if (["non ammesso", "non ammessa", "rejected", "no", "false", "0", "respinto", "fail"].includes(normalized)) {
+    return "rejected";
+  }
+
+  return "";
 }
 
 function hydrateCourseSelect(data = []) {
@@ -205,6 +228,75 @@ function normalizeSession(value) {
     return normalized;
   }
   return "";
+}
+
+function buildCourseBoundaries(rows) {
+  const grouped = rows.reduce((acc, row) => {
+    const key = `${row.course}__${normalizeSession(row.session) || "early"}`;
+    if (!acc[key]) {
+      acc[key] = {
+        course: row.course,
+        session: normalizeSession(row.session) || "early",
+        allScores: [],
+        admittedRows: [],
+        rejectedRows: [],
+      };
+    }
+
+    const score = computeScoreValue(row.minMedia, row.minScore);
+    if (!Number.isFinite(score)) return acc;
+
+    acc[key].allScores.push(score);
+    if (row.admitted === "admitted") {
+      acc[key].admittedRows.push({ ...row, totalScore: score });
+    }
+    if (row.admitted === "rejected") {
+      acc[key].rejectedRows.push({ ...row, totalScore: score });
+    }
+    return acc;
+  }, {});
+
+  return Object.values(grouped).map((group) => ({
+    course: group.course,
+    session: group.session,
+    admittedCutoff: group.admittedRows.length
+      ? Math.min(...group.admittedRows.map((row) => row.totalScore))
+      : (group.allScores.length ? Math.min(...group.allScores) : null),
+    rejectedCutoff: group.rejectedRows.length
+      ? Math.max(...group.rejectedRows.map((row) => row.totalScore))
+      : null,
+    admittedPoint: selectBoundaryPoint(group.admittedRows, "min"),
+    rejectedPoint: selectBoundaryPoint(group.rejectedRows, "max"),
+  }));
+}
+
+function selectBoundaryPoint(rows, mode) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const sorted = [...rows].sort((left, right) => left.totalScore - right.totalScore);
+  const row = mode === "max" ? sorted[sorted.length - 1] : sorted[0];
+  return {
+    x: row.minScore,
+    y: row.minMedia,
+    course: row.course,
+    session: row.session,
+    admitted: row.admitted,
+    totalScore: row.totalScore,
+  };
+}
+
+function getBoundaryForCourse(course, session) {
+  return state.courseBoundaries.find((boundary) => boundary.course === course && normalizeSession(boundary.session) === normalizeSession(session));
+}
+
+function getVisibleBoundaries(session, focusCourse, kind) {
+  const normalizedSession = normalizeSession(session);
+  return state.courseBoundaries.filter((boundary) => {
+    if (normalizedSession && normalizeSession(boundary.session) !== normalizedSession) return false;
+    if (focusCourse && boundary.course !== focusCourse) return false;
+    if (kind === "admitted") return typeof boundary.admittedCutoff === "number";
+    if (kind === "rejected") return typeof boundary.rejectedCutoff === "number";
+    return true;
+  });
 }
 
 function getSelectedSession() {
@@ -286,7 +378,7 @@ function updateCalculator(event) {
 function filterAdmissions(candidateScore, focusCourse, session = "") {
   if (!state.ready || state.admissions.length === 0) return [];
 
-  return state.admissions
+  const matchingRows = state.admissions
     .map((row) => {
       const requiredScore = computeScoreValue(row.minMedia, row.minScore);
       return { ...row, requiredScore };
@@ -296,6 +388,16 @@ function filterAdmissions(candidateScore, focusCourse, session = "") {
       if (focusCourse && row.course !== focusCourse) return false;
       return candidateScore >= row.requiredScore;
     });
+
+  const deduped = matchingRows.reduce((acc, row) => {
+    const existing = acc.get(row.course);
+    if (!existing || row.requiredScore < existing.requiredScore) {
+      acc.set(row.course, row);
+    }
+    return acc;
+  }, new Map());
+
+  return [...deduped.values()].sort((left, right) => left.requiredScore - right.requiredScore);
 }
 
 function buildCourseList(courses, focusCourse, session, candidateScore) {
@@ -433,6 +535,15 @@ function setupChartModule() {
     });
   }
 
+  const rejectedToggle = document.getElementById("toggleRejectedButton");
+  if (rejectedToggle) {
+    rejectedToggle.addEventListener("click", () => {
+      state.showRejectedAdmissions = !state.showRejectedAdmissions;
+      updateRejectedToggleButton();
+      renderAdmissionsChart();
+    });
+  }
+
   const sessionSelect = document.getElementById("sessionFilterSelect");
   if (sessionSelect) {
     sessionSelect.addEventListener("change", () => {
@@ -441,6 +552,7 @@ function setupChartModule() {
     });
   }
 
+  updateRejectedToggleButton();
   updateChartCaption(state.chartFocus);
 }
 
@@ -448,49 +560,7 @@ function getChartConfig() {
   return {
     type: "scatter",
     data: {
-      datasets: [
-        {
-          label: "Soglie storiche",
-          data: [],
-          parsing: false,
-          pointRadius: (context) => {
-            const course = context.raw?.course;
-            return state.chartFocus && course === state.chartFocus ? 8 : 5;
-          },
-          pointHoverRadius: 10,
-          pointBackgroundColor: (context) => {
-            const course = context.raw?.course;
-            return state.chartFocus && course === state.chartFocus
-              ? "#ff4f70"
-              : "rgba(86, 207, 225, 0.7)";
-          },
-          pointBorderWidth: 0,
-        },
-        {
-          label: "Trade-off equivalente",
-          data: [],
-          parsing: false,
-          showLine: true,
-          borderColor: "#ff4f70",
-          borderWidth: 2,
-          backgroundColor: "rgba(255, 79, 112, 0.15)",
-          pointRadius: 0,
-          tension: 0.25,
-          hidden: true,
-          spanGaps: false,
-        },
-        {
-          label: "Il tuo profilo",
-          data: [],
-          parsing: false,
-          pointRadius: 9,
-          pointHoverRadius: 11,
-          pointBackgroundColor: "#56cfe1",
-          pointBorderColor: "#05060a",
-          pointBorderWidth: 2,
-          showLine: false,
-        },
-      ],
+      datasets: [],
     },
     options: {
       responsive: true,
@@ -536,19 +606,30 @@ function getChartConfig() {
         tooltip: {
           callbacks: {
             label: (context) => {
-              if (context.dataset.label === "Trade-off equivalente") {
-                const mediaVal = context.parsed?.y ?? 0;
-                const scoreVal = context.parsed?.x ?? 0;
-                const courseName = context.raw?.course;
-                if (courseName) {
-                  return `${courseName}: media ${mediaVal.toFixed(2)} ↔ score ${scoreVal.toFixed(1)}`;
-                }
-                return `Media ${mediaVal.toFixed(2)} ↔ score ${scoreVal.toFixed(1)}`;
+              if (context.dataset?.metaKind === "admitted-point" || context.dataset?.metaKind === "rejected-point") {
+                const courseName = context.raw?.course || "Corso";
+                const session = context.raw?.session || "";
+                const totalScore = Number.isFinite(context.raw?.totalScore)
+                  ? context.raw.totalScore
+                  : computeScoreValue(context.raw?.y ?? MEDIA_RANGE.min, context.raw?.x ?? SCORE_RANGE.min);
+                const mediaVal = context.raw?.y ?? 0;
+                const scoreVal = context.raw?.x ?? 0;
+                const status = context.dataset?.metaKind === "admitted-point" ? "ammesso" : "non ammesso";
+                return `${courseName}${session ? ` · ${session}` : ""}: ${status}, punteggio complessivo ${totalScore.toFixed(3)}, media ${mediaVal.toFixed(2)}, score ${scoreVal.toFixed(1)}`;
+              }
+              if (context.dataset?.metaKind === "admitted-line" || context.dataset?.metaKind === "rejected-line") {
+                const courseName = context.raw?.course || "Corso";
+                const totalScore = Number.isFinite(context.raw?.totalScore) ? context.raw.totalScore : null;
+                return totalScore !== null
+                  ? `${courseName}: retta con punteggio complessivo ${totalScore.toFixed(3)}`
+                  : `${courseName}: retta di ammissione`;
               }
               const course = context.raw?.course || "Corso";
               const mediaVal = context.raw?.y ?? 0;
               const scoreVal = context.raw?.x ?? 0;
-              return `${course}: media ${mediaVal.toFixed(2)} · score ${scoreVal.toFixed(1)}`;
+              const admitted = context.raw?.admitted;
+              const status = admitted === "admitted" ? "ammesso" : admitted === "rejected" ? "non ammesso" : "dato storico";
+              return `${course}: media ${mediaVal.toFixed(2)} · score ${scoreVal.toFixed(1)} (${status})`;
             },
           },
         },
@@ -560,77 +641,209 @@ function getChartConfig() {
 function renderAdmissionsChart() {
   if (!state.chart) return;
 
-  const scatterDataset = state.chart.data.datasets[0];
-  const isoDataset = state.chart.data.datasets[1];
-  const candidateDataset = state.chart.data.datasets[2];
   const selectedSession = getSelectedSession();
   const admissions = state.ready
     ? state.admissions.filter((row) => normalizeSession(row.session) === selectedSession)
     : [];
-
+  const admittedBoundaries = getVisibleBoundaries(selectedSession, state.chartFocus, "admitted");
+  const rejectedBoundaries = getVisibleBoundaries(selectedSession, state.chartFocus, "rejected");
+  const hasSelectedCourse = Boolean(state.chartFocus);
   if (!state.ready) {
-    scatterDataset.data = [];
-    isoDataset.data = [];
-    isoDataset.hidden = true;
-    if (candidateDataset) {
-      candidateDataset.data = [];
-    }
+    state.chart.data.datasets = [];
+    updateChartLegend([]);
+    updateRejectedToggleButton();
     state.chart.update();
     return;
   }
 
-  if (!state.chartFocus) {
-    scatterDataset.data = admissions.map((row) => ({
-      x: row.minScore,
-      y: row.minMedia,
-      course: row.course,
-    }));
+  const datasets = buildChartDatasets({
+    admissions,
+    admittedBoundaries,
+    rejectedBoundaries,
+    selectedSession,
+    focusCourse: state.chartFocus,
+    showRejected: state.showRejectedAdmissions && hasSelectedCourse,
+    candidatePoint: state.candidatePoint,
+  });
 
-    const isoSeries = [];
-    admissions.forEach((row, idx) => {
-      const series = buildIsoSeries(row, row.course);
-      isoSeries.push(...series);
-      if (idx < admissions.length - 1) {
-        isoSeries.push({ x: null, y: null });
-      }
-    });
-
-    isoDataset.data = isoSeries;
-    isoDataset.hidden = isoDataset.data.length === 0;
-    if (candidateDataset) {
-      candidateDataset.data = state.candidatePoint ? [state.candidatePoint] : [];
-    }
-    state.chart.update();
-    return;
-  }
-
-  const targetRow = admissions.find((row) => row.course === state.chartFocus);
-  if (!targetRow) {
-    scatterDataset.data = [];
-    isoDataset.data = [];
-    isoDataset.hidden = true;
-    state.chart.update();
-    return;
-  }
-
-  scatterDataset.data = [
-    {
-      x: targetRow.minScore,
-      y: targetRow.minMedia,
-      course: targetRow.course,
-    },
-  ];
-
-  isoDataset.data = buildIsoSeries(targetRow, targetRow.course);
-  isoDataset.hidden = isoDataset.data.length === 0;
-  if (candidateDataset) {
-    candidateDataset.data = state.candidatePoint ? [state.candidatePoint] : [];
-  }
+  state.chart.data.datasets = datasets;
+  applyChartScale(datasets);
+  updateChartLegend(datasets);
+  updateRejectedToggleButton();
   state.chart.update();
 }
 
-function buildIsoSeries(courseRow, courseName = "") {
-  const requiredScore = computeScoreValue(courseRow.minMedia, courseRow.minScore);
+function buildChartDatasets({
+  admissions,
+  admittedBoundaries,
+  rejectedBoundaries,
+  focusCourse,
+  showRejected,
+  candidatePoint,
+}) {
+  const datasets = [];
+  const pointColor = "rgba(86, 207, 225, 0.9)";
+
+  if (!focusCourse) {
+    datasets.push({
+      label: "Punti ammessi",
+      metaKind: "admitted-point",
+      type: "scatter",
+      data: admittedBoundaries.map((boundary) => boundary.admittedPoint).filter(Boolean),
+      parsing: false,
+      pointRadius: 5,
+      pointHoverRadius: 10,
+      pointBackgroundColor: pointColor,
+      pointBorderWidth: 0,
+    });
+
+    admittedBoundaries.forEach((boundary) => {
+      datasets.push(buildCourseLineDataset(boundary.course, boundary.admittedCutoff, getCourseColor(boundary.course), "admitted-line"));
+    });
+  } else {
+    const boundary = getBoundaryForCourse(focusCourse, getSelectedSession());
+    const admittedPoint = boundary?.admittedPoint || null;
+    const rejectedPoint = boundary?.rejectedPoint || null;
+
+    datasets.push({
+      label: "Punto ammesso",
+      metaKind: "admitted-point",
+      type: "scatter",
+      data: admittedPoint ? [admittedPoint] : [],
+      parsing: false,
+      pointRadius: 8,
+      pointHoverRadius: 10,
+      pointBackgroundColor: pointColor,
+      pointBorderWidth: 0,
+    });
+
+    datasets.push(buildCourseLineDataset(focusCourse, boundary?.admittedCutoff, getCourseColor(focusCourse), "admitted-line"));
+
+    if (showRejected && rejectedPoint) {
+      datasets.push({
+        label: "Punto non ammesso",
+        metaKind: "rejected-point",
+        type: "scatter",
+        data: [rejectedPoint],
+        parsing: false,
+        pointRadius: 8,
+        pointHoverRadius: 10,
+        pointBackgroundColor: "rgba(255, 129, 154, 0.9)",
+        pointBorderWidth: 0,
+      });
+
+      datasets.push(buildCourseLineDataset(focusCourse, boundary?.rejectedCutoff, "#ff819a", "rejected-line"));
+    }
+  }
+
+  if (candidatePoint) {
+    datasets.push({
+      label: "Il tuo profilo",
+      metaKind: "candidate",
+      type: "scatter",
+      data: [candidatePoint],
+      parsing: false,
+      pointRadius: 9,
+      pointHoverRadius: 11,
+      pointBackgroundColor: "#56cfe1",
+      pointBorderColor: "#05060a",
+      pointBorderWidth: 2,
+    });
+  }
+
+  return datasets;
+}
+
+function buildCourseLineDataset(course, cutoff, borderColor, metaKind) {
+  const data = typeof cutoff === "number" ? buildIsoSeriesFromCutoff(cutoff, course) : [];
+  return {
+    label: course,
+    metaKind,
+    type: "line",
+    data,
+    parsing: false,
+    showLine: true,
+    borderColor,
+    borderWidth: 2,
+    backgroundColor: borderColor,
+    pointRadius: 0,
+    tension: 0.25,
+    hidden: data.length === 0,
+    spanGaps: false,
+    fill: false,
+  };
+}
+
+function applyChartScale(datasets) {
+  if (!state.chart) return;
+
+  const points = datasets.flatMap((dataset) => Array.isArray(dataset.data) ? dataset.data : []);
+  if (!points.length) return;
+
+  const xValues = points.map((point) => point.x).filter((value) => Number.isFinite(value));
+  const yValues = points.map((point) => point.y).filter((value) => Number.isFinite(value));
+  if (!xValues.length || !yValues.length) return;
+
+  const xMin = Math.min(...xValues);
+  const xMax = Math.max(...xValues);
+  const yMin = Math.min(...yValues);
+  const yMax = Math.max(...yValues);
+  const xPadding = Math.max((xMax - xMin) * 0.12, 1.2);
+  const yPadding = Math.max((yMax - yMin) * 0.12, 0.25);
+
+  state.chart.options.scales.x.min = Math.max(SCORE_RANGE.min, xMin - xPadding);
+  state.chart.options.scales.x.max = Math.min(SCORE_RANGE.max, xMax + xPadding);
+  state.chart.options.scales.y.min = Math.max(MEDIA_RANGE.min, yMin - yPadding);
+  state.chart.options.scales.y.max = Math.min(MEDIA_RANGE.max, yMax + yPadding);
+}
+
+function getCourseColor(course) {
+  const palette = [
+    "#56cfe1",
+    "#7df2be",
+    "#ffd166",
+    "#ff9f68",
+    "#c77dff",
+    "#4dd6ac",
+    "#6ea8fe",
+    "#f78fb3",
+  ];
+  const hash = [...String(course || "")].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return palette[hash % palette.length];
+}
+
+function updateChartLegend(datasets) {
+  const legend = document.getElementById("chartLegend");
+  if (!legend) return;
+
+  const items = datasets
+    .filter((dataset) => dataset?.metaKind === "admitted-line" || dataset?.metaKind === "rejected-line")
+    .map((dataset) => {
+      const color = dataset.borderColor || "#56cfe1";
+      const label = dataset.label || "Corso";
+      return `<div class="chart-legend__item"><span class="chart-legend__swatch" style="background:${color}"></span><span>${escapeHtml(label)}</span></div>`;
+    });
+
+  legend.innerHTML = items.length
+    ? items.join("")
+    : '<div class="chart-legend__item"><span class="chart-legend__swatch" style="background:#56cfe1"></span><span>Nessuna linea disponibile</span></div>';
+}
+
+function buildBoundarySeries(boundaries, cutoffKey) {
+  const series = [];
+  boundaries.forEach((boundary, index) => {
+    const cutoff = boundary?.[cutoffKey];
+    if (typeof cutoff !== "number") return;
+    const boundarySeries = buildIsoSeriesFromCutoff(cutoff, boundary.course);
+    series.push(...boundarySeries);
+    if (index < boundaries.length - 1) {
+      series.push({ x: null, y: null, course: boundary.course });
+    }
+  });
+  return series;
+}
+
+function buildIsoSeriesFromCutoff(requiredScore, courseName = "") {
   const steps = 24;
   const points = [];
 
@@ -641,7 +854,8 @@ function buildIsoSeries(courseRow, courseName = "") {
     points.push({
       x: parseFloat(scoreValue.toFixed(2)),
       y: parseFloat(mediaValue.toFixed(2)),
-      course: courseName || courseRow.course,
+      course: courseName,
+      totalScore: requiredScore,
     });
   }
 
@@ -665,9 +879,23 @@ function updateChartCaption(courseName) {
   const caption = document.getElementById("chartCaption");
   if (!caption) return;
   const session = getSelectedSession();
+  const toggleLabel = state.showRejectedAdmissions ? "non ammessi visibili" : "non ammessi nascosti";
   caption.textContent = courseName
-    ? `Sessione ${session} e filtro su ${courseName}: vedi il punto storico e la linea di combinazioni equivalenti media + score.`
-    : `Sessione ${session} attiva: visualizzi tutte le soglie storiche di questa sessione.`;
+    ? `Sessione ${session} e filtro su ${courseName}: ${toggleLabel}. Passa sui punti per vedere il punteggio complessivo; il blu mostra l'ammesso, il rosso compare solo con il bottone.`
+    : `Sessione ${session} attiva: vedi solo i punti blu con la loro retta per ogni corso; passa sui punti per leggere il punteggio complessivo.`;
+}
+
+function updateRejectedToggleButton() {
+  const button = document.getElementById("toggleRejectedButton");
+  if (!button) return;
+  const enabled = Boolean(state.chartFocus);
+  button.disabled = !enabled;
+  button.setAttribute("aria-pressed", String(state.showRejectedAdmissions));
+  button.textContent = !enabled
+    ? "Mostra non ammessi"
+    : state.showRejectedAdmissions
+      ? "Nascondi non ammessi"
+      : "Mostra non ammessi";
 }
 
 function updateCandidatePlot(mediaValue, scoreValue) {
@@ -685,7 +913,7 @@ function updateCandidatePlot(mediaValue, scoreValue) {
   }
 
   if (!state.chart) return;
-  const candidateDataset = state.chart.data.datasets[2];
+  const candidateDataset = state.chart.data.datasets.find((dataset) => dataset?.metaKind === "candidate");
   if (!candidateDataset) return;
 
   candidateDataset.data = state.candidatePoint ? [state.candidatePoint] : [];

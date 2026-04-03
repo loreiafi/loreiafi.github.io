@@ -672,6 +672,30 @@ small {
   min-width: 220px;
 }
 
+.chart-toggle-button {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 12px 18px;
+  font: inherit;
+  font-size: 0.92rem;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.chart-toggle-button:hover,
+.chart-toggle-button:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(125, 242, 190, 0.45);
+  background: rgba(125, 242, 190, 0.08);
+}
+
+.chart-toggle-button[aria-pressed="true"] {
+  border-color: rgba(255, 129, 154, 0.5);
+  background: rgba(255, 129, 154, 0.12);
+}
+
 .chart-caption {
   flex: 1;
   margin: 0;
@@ -690,6 +714,32 @@ small {
 .chart-canvas canvas {
   width: 100%;
   min-height: 360px;
+}
+
+.chart-legend {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.chart-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.chart-legend__swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  flex: 0 0 12px;
 }
 
 .results-output {

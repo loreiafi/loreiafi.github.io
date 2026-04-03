@@ -1,7 +1,16 @@
-course,session,min_media,min_score
-BIEM,early,9.5,29.2
-CLEAM,early,7.75,35.60
-BIEF,early,8.9,36.5
-BIEM,winter,7.9, 40.07
-CLEAM,winter,8,29.93
-BIEF,winter,8,44
+course,session,min_media,min_score,admitted
+BIEM,early,9.5,29.2,ammesso
+CLEAM,early,7.75,35.60,ammesso
+BIEF,early,8.9,36.5,ammesso
+BIEM,winter,7.65,38.47,ammesso
+CLEAM,winter,8,29.93,ammesso
+BIEF,winter,8,44,ammesso
+BIEF,winter,8.2,35,ammesso
+CLEACC,winter,7.67,31.27,ammesso
+CLEAM,winter,6.67,38.60,non ammesso
+BESS,winter,7.75,34.67,ammesso
+BAI,winter,8.5,39.5,ammesso
+CLEAM,winter,7.5,34.07,ammesso
+BIEF,winter,8.4,34.20,ammesso
+BAI,winter,7.5,47.6,non ammesso
+BEMACS,winter,7.5,47.6,ammesso
