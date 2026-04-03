@@ -15,8 +15,16 @@ const FINGERPRINT_KEY = "bocconiSessionFingerprint";
 const ADMIN_UNLOCK_KEY = "bocconiAdminUnlocked";
 const ADMIN_OVERRIDES_KEY = "bocconiAdminOverrides";
 const ADMIN_DELETED_KEY = "bocconiAdminDeleted";
-const ADMIN_ACCESS_KEY = 
+const ADMIN_ACCESS_KEY =
   (typeof window !== "undefined" && window.ADMIN_ACCESS_KEY) || "";
+const SUPABASE_URL =
+  (typeof window !== "undefined" && window.SUPABASE_URL) || "";
+const SUPABASE_ANON_KEY =
+  (typeof window !== "undefined" && window.SUPABASE_ANON_KEY) || "";
+const SUPABASE_ADMIN_EMAIL =
+  (typeof window !== "undefined" && window.SUPABASE_ADMIN_EMAIL) || "";
+
+let supabaseClient = null;
 
 const state = {
   admissions: [],
@@ -30,6 +38,9 @@ const state = {
   adminUnlocked: false,
   adminOverrides: { intake: {}, profiles: {} },
   adminDeleted: { intake: {}, profiles: {} },
+  supabaseProfiles: [],
+  supabaseProfilesError: "",
+  sessionDataError: "",
   sessionChart: null,
   sessionSubmitted: false,
   sessionUserEntry: null,
@@ -51,6 +62,38 @@ document.addEventListener("DOMContentLoaded", () => {
   initResultsModal();
   initSessionModule();
 });
+
+function getSupabaseClient() {
+  if (supabaseClient) return supabaseClient;
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
+  const factory = window?.supabase?.createClient;
+  if (typeof factory !== "function") {
+    console.warn("Supabase SDK non disponibile nel browser.");
+    return null;
+  }
+  supabaseClient = factory(SUPABASE_URL, SUPABASE_ANON_KEY);
+  return supabaseClient;
+}
+
+function isSupabaseConfigured() {
+  return Boolean(getSupabaseClient());
+}
+
+function mapAdmissionRow(row) {
+  const course = row.course || row.courses || "";
+  const session = normalizeSession(row.session) || "early";
+  const minMedia = parseFloat(row.min_media ?? row.minmedia ?? row.media ?? row.gpa);
+  const minScore = parseFloat(row.min_score ?? row.minscore ?? row.score);
+  const admitted = normalizeAdmissionStatus(row.admitted ?? row.status ?? row.esito ?? row.decision);
+
+  return {
+    course,
+    session,
+    minMedia,
+    minScore,
+    admitted,
+  };
+}
 
 function initMobileNavigation() {
   const toggle = document.getElementById("navToggle");
@@ -112,31 +155,39 @@ function initSessionSwitch() {
   syncFromSelect();
 }
 
-function loadAdmissions() {
-  fetch("data/admissions.csv")
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error("Impossibile caricare il CSV");
-      }
-      return response.text();
-    })
-    .then((text) => {
-      state.admissions = parseCsv(text);
-      state.courseBoundaries = buildCourseBoundaries(state.admissions);
-      state.ready = true;
-      hydrateCourseSelect(state.admissions);
-      const chartSelect = document.getElementById("chartCourseSelect");
-      state.chartFocus = chartSelect ? chartSelect.value : "";
-      updateChartCaption(state.chartFocus);
-      renderAdmissionsChart();
-      updateCalculator();
-    })
-    .catch((error) => {
-      const results = document.getElementById("results");
-      if (results) {
-        results.innerHTML = `<p>Errore durante il caricamento dei dati: ${error.message}</p>`;
-      }
-    });
+async function loadAdmissions() {
+  try {
+    if (!isSupabaseConfigured()) {
+      throw new Error("Supabase non configurato: impossibile caricare admissions.");
+    }
+
+    const client = getSupabaseClient();
+    const { data, error } = await client
+      .from("admissions")
+      .select("course,session,min_media,min_score,admitted,status,decision")
+      .order("course", { ascending: true });
+
+    if (error) {
+      throw new Error(`Supabase admissions error: ${error.message}`);
+    }
+
+    const admissionsRows = Array.isArray(data) ? data.map(mapAdmissionRow) : [];
+
+    state.admissions = admissionsRows.filter((row) => row.course && Number.isFinite(row.minMedia) && Number.isFinite(row.minScore));
+    state.courseBoundaries = buildCourseBoundaries(state.admissions);
+    state.ready = true;
+    hydrateCourseSelect(state.admissions);
+    const chartSelect = document.getElementById("chartCourseSelect");
+    state.chartFocus = chartSelect ? chartSelect.value : "";
+    updateChartCaption(state.chartFocus);
+    renderAdmissionsChart();
+    updateCalculator();
+  } catch (error) {
+    const results = document.getElementById("results");
+    if (results) {
+      results.innerHTML = `<p>Errore durante il caricamento dei dati: ${error.message}</p>`;
+    }
+  }
 }
 
 function parseCsv(text) {
@@ -152,19 +203,7 @@ function parseCsv(text) {
       return acc;
     }, {});
 
-    const course = row.course || row.courses || "";
-    const session = normalizeSession(row.session) || "early";
-    const minMedia = parseFloat(row.min_media ?? row.minmedia ?? row.media ?? row.gpa);
-    const minScore = parseFloat(row.min_score ?? row.minscore ?? row.score);
-    const admitted = normalizeAdmissionStatus(row.admitted ?? row.status ?? row.esito ?? row.decision);
-
-    return {
-      course,
-      session,
-      minMedia,
-      minScore,
-      admitted,
-    };
+    return mapAdmissionRow(row);
   }).filter((row) => row.course && Number.isFinite(row.minMedia) && Number.isFinite(row.minScore));
 }
 
@@ -927,7 +966,7 @@ function attachLoginForm() {
 
   const feedback = document.getElementById("loginFeedback");
 
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(form));
     if (!data.consent) {
@@ -935,16 +974,33 @@ function attachLoginForm() {
       return;
     }
 
-    const adminId = `profile-${Date.now()}`;
-    localStorage.setItem("bocconiAccessProfile", JSON.stringify(data));
-    const existing = readStoredProfiles();
-    existing.push({
-      ...data,
-      __adminId: adminId,
-      timestamp: new Date().toISOString(),
-    });
-    localStorage.setItem("bocconiAccessProfiles", JSON.stringify(existing));
-    feedback.textContent = "Profilo salvato in locale. Reindirizzamento...";
+    if (!isSupabaseConfigured()) {
+      feedback.textContent = "Supabase non configurato: impossibile salvare il profilo.";
+      feedback.classList.add("error");
+      return;
+    }
+
+    const client = getSupabaseClient();
+    const { error } = await client.from("profiles").insert([
+      {
+        first_name: data.firstName || "",
+        last_name: data.lastName || "",
+        email: data.email || "",
+        nationality: data.nationality || "",
+        target_course: data.targetCourse || "",
+        phone: data.phone || "",
+        notes: data.notes || "",
+      },
+    ]);
+
+    if (error) {
+      feedback.textContent = `Salvataggio Supabase non riuscito: ${error.message}`;
+      feedback.classList.add("error");
+      return;
+    }
+
+    feedback.textContent = "Profilo salvato su Supabase. Reindirizzamento...";
+    feedback.classList.remove("error");
     form.classList.add("is-submitted");
 
     setTimeout(() => {
@@ -958,15 +1014,48 @@ function initAdminModule() {
   const logoutBtn = document.getElementById("adminLogout");
   if (!unlockForm) return;
 
-  unlockForm.addEventListener("submit", (event) => {
+  unlockForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const message = document.getElementById("adminMessage");
     const input = document.getElementById("adminAccessKey");
     const value = String(input?.value || "").trim();
 
+    if (isSupabaseConfigured()) {
+      if (!SUPABASE_ADMIN_EMAIL) {
+        if (message) {
+          message.textContent = "Configura window.SUPABASE_ADMIN_EMAIL nella pagina admin.";
+          message.classList.add("error");
+        }
+        return;
+      }
+
+      const client = getSupabaseClient();
+      const { error } = await client.auth.signInWithPassword({
+        email: SUPABASE_ADMIN_EMAIL,
+        password: value,
+      });
+
+      if (error) {
+        if (message) {
+          message.textContent = "Credenziali admin non valide.";
+          message.classList.add("error");
+        }
+        return;
+      }
+
+      state.adminUnlocked = true;
+      await refreshAdminProfilesFromSupabase();
+      if (message) {
+        message.textContent = "Accesso admin effettuato.";
+        message.classList.remove("error");
+      }
+      renderAdminPanel();
+      return;
+    }
+
     if (!ADMIN_ACCESS_KEY || ADMIN_ACCESS_KEY === "cambia-questa-chiave-admin") {
       if (message) {
-        message.textContent = "Configura prima window.ADMIN_ACCESS_KEY in index.html.";
+        message.textContent = "Configura prima window.ADMIN_ACCESS_KEY in admin.html.";
         message.classList.add("error");
       }
       return;
@@ -981,7 +1070,6 @@ function initAdminModule() {
     }
 
     state.adminUnlocked = true;
-    sessionStorage.setItem(ADMIN_UNLOCK_KEY, "1");
     if (message) {
       message.textContent = "Accesso admin effettuato.";
       message.classList.remove("error");
@@ -990,12 +1078,27 @@ function initAdminModule() {
   });
 
   if (logoutBtn) {
-    logoutBtn.addEventListener("click", () => {
+    logoutBtn.addEventListener("click", async () => {
+      if (isSupabaseConfigured()) {
+        const client = getSupabaseClient();
+        await client.auth.signOut();
+      }
       state.adminUnlocked = false;
-      sessionStorage.removeItem(ADMIN_UNLOCK_KEY);
       const input = document.getElementById("adminAccessKey");
       if (input) input.value = "";
       renderAdminPanel();
+    });
+  }
+
+  if (isSupabaseConfigured()) {
+    const client = getSupabaseClient();
+    client.auth.getSession().then(({ data }) => {
+      if (data?.session) {
+        state.adminUnlocked = true;
+        refreshAdminProfilesFromSupabase().finally(() => {
+          renderAdminPanel();
+        });
+      }
     });
   }
 
@@ -1003,24 +1106,46 @@ function initAdminModule() {
   attachAdminEditors();
 }
 
-function bootstrapAdminPersistence() {
-  loadAdminOverrides();
-  loadAdminDeleted();
-  state.adminUnlocked = sessionStorage.getItem(ADMIN_UNLOCK_KEY) === "1";
+async function refreshAdminProfilesFromSupabase() {
+  state.supabaseProfilesError = "";
+  if (!isSupabaseConfigured() || !state.adminUnlocked) {
+    state.supabaseProfiles = [];
+    return;
+  }
 
-  window.addEventListener("storage", (event) => {
-    if (!event.key || ![ADMIN_OVERRIDES_KEY, ADMIN_DELETED_KEY, "bocconiAccessProfiles", "bocconiAccessProfile"].includes(event.key)) {
+  try {
+    const client = getSupabaseClient();
+    const { data, error } = await client.from("profiles").select("*");
+
+    if (error) {
+      state.supabaseProfiles = [];
+      state.supabaseProfilesError = error.message || "Impossibile leggere profiles da Supabase.";
       return;
     }
 
-    loadAdminOverrides();
-    loadAdminDeleted();
-    if (state.sessionData.length) {
-      state.sessionData = getMergedAdminIntakeRows();
-      updateSessionDashboard();
-      renderAdminPanel();
-    }
-  });
+    const rows = Array.isArray(data) ? data : [];
+    state.supabaseProfiles = rows.map((profile, index) => ({
+      firstName: profile.first_name || profile.firstName || "",
+      lastName: profile.last_name || profile.lastName || "",
+      email: profile.email || "",
+      nationality: profile.nationality || "",
+      targetCourse: profile.target_course || profile.targetCourse || "",
+      phone: profile.phone || "",
+      notes: profile.notes || "",
+      timestamp: profile.created_at || profile.timestamp || "",
+      __supabaseId: profile.id || null,
+      __adminId: `sb-${profile.id || profile.email || index}`,
+    }));
+  } catch (error) {
+    state.supabaseProfiles = [];
+    state.supabaseProfilesError = error?.message || "Errore durante la lettura da Supabase.";
+  }
+}
+
+function bootstrapAdminPersistence() {
+  loadAdminOverrides();
+  loadAdminDeleted();
+  state.adminUnlocked = false;
 }
 
 function renderAdminPanel() {
@@ -1045,6 +1170,10 @@ function renderAdminIntakeTable() {
   if (!container) return;
   const rowsData = getMergedAdminIntakeRows();
   if (!rowsData.length) {
+    if (state.sessionDataError) {
+      container.innerHTML = `<p>Nessun dato intake visibile. Supabase ha risposto: ${escapeHtml(state.sessionDataError)}</p>`;
+      return;
+    }
     container.innerHTML = "<p>Nessun dato intake disponibile.</p>";
     return;
   }
@@ -1117,7 +1246,11 @@ function renderAdminProfilesTable() {
 
   const profiles = getMergedAdminProfiles();
   if (!profiles.length) {
-    container.innerHTML = "<p>Nessun profilo registrato nel browser locale.</p>";
+    if (state.supabaseProfilesError) {
+      container.innerHTML = `<p>Nessun profilo visibile. Supabase ha risposto: ${escapeHtml(state.supabaseProfilesError)}</p>`;
+      return;
+    }
+    container.innerHTML = "<p>Nessun profilo disponibile (locale o Supabase).</p>";
     return;
   }
 
@@ -1165,7 +1298,7 @@ function attachAdminEditors() {
   const intakeContainer = document.getElementById("adminIntakeTable");
   const profilesContainer = document.getElementById("adminProfilesTable");
 
-  const handleClick = (event) => {
+  const handleClick = async (event) => {
     const saveBtn = event.target.closest(".admin-save-row");
     const resetBtn = event.target.closest(".admin-reset-row");
     const deleteBtn = event.target.closest(".admin-delete-row");
@@ -1174,27 +1307,27 @@ function attachAdminEditors() {
 
     if (saveBtn) {
       if (row.closest("#adminIntakeTable")) {
-        saveAdminIntakeRow(row);
+        await saveAdminIntakeRow(row);
       } else if (row.closest("#adminProfilesTable")) {
-        saveAdminProfileRow(row);
+        await saveAdminProfileRow(row);
       }
       return;
     }
 
     if (resetBtn) {
       if (row.closest("#adminIntakeTable")) {
-        resetAdminIntakeRow(row);
+        await resetAdminIntakeRow(row);
       } else if (row.closest("#adminProfilesTable")) {
-        resetAdminProfileRow(row);
+        await resetAdminProfileRow(row);
       }
       return;
     }
 
     if (deleteBtn) {
       if (row.closest("#adminIntakeTable")) {
-        deleteAdminIntakeRow(row);
+        await deleteAdminIntakeRow(row);
       } else if (row.closest("#adminProfilesTable")) {
-        deleteAdminProfileRow(row);
+        await deleteAdminProfileRow(row);
       }
     }
   };
@@ -1204,75 +1337,31 @@ function attachAdminEditors() {
 }
 
 function loadAdminOverrides() {
-  try {
-    const raw = localStorage.getItem(ADMIN_OVERRIDES_KEY);
-    if (!raw) {
-      state.adminOverrides = { intake: {}, profiles: {} };
-      return;
-    }
-    const parsed = JSON.parse(raw);
-    state.adminOverrides = {
-      intake: parsed?.intake || {},
-      profiles: parsed?.profiles || {},
-    };
-  } catch (error) {
-    console.warn("Override admin non valide", error);
-    state.adminOverrides = { intake: {}, profiles: {} };
-  }
+  state.adminOverrides = { intake: {}, profiles: {} };
 }
 
 function loadAdminDeleted() {
-  try {
-    const raw = localStorage.getItem(ADMIN_DELETED_KEY);
-    if (!raw) {
-      state.adminDeleted = { intake: {}, profiles: {} };
-      return;
-    }
-    const parsed = JSON.parse(raw);
-    state.adminDeleted = {
-      intake: parsed?.intake || {},
-      profiles: parsed?.profiles || {},
-    };
-  } catch (error) {
-    console.warn("Eliminazioni admin non valide", error);
-    state.adminDeleted = { intake: {}, profiles: {} };
-  }
+  state.adminDeleted = { intake: {}, profiles: {} };
 }
 
 function saveAdminOverrides() {
-  localStorage.setItem(ADMIN_OVERRIDES_KEY, JSON.stringify(state.adminOverrides));
+  // Persistenza spostata su Supabase.
 }
 
 function saveAdminDeleted() {
-  localStorage.setItem(ADMIN_DELETED_KEY, JSON.stringify(state.adminDeleted));
+  // Persistenza spostata su Supabase.
 }
 
 function getMergedAdminIntakeRows() {
-  const baseRows = Array.isArray(state.sessionData) ? state.sessionData : [];
-  return baseRows.map((row) => {
-    const key = row.fingerprint || row.id;
-    if (key && state.adminDeleted.intake[key]) {
-      return null;
-    }
-    const override = key ? state.adminOverrides.intake[key] : null;
-    return override ? { ...row, ...override } : row;
-  }).filter(Boolean);
+  return Array.isArray(state.sessionData) ? state.sessionData : [];
 }
 
 function getMergedAdminProfiles() {
-  const baseProfiles = readStoredProfiles();
-  return baseProfiles.map((profile, index) => {
-    const adminId = profile.timestamp || profile.email || `${profile.firstName || "profile"}-${index}`;
-    if (state.adminDeleted.profiles[adminId]) {
-      return null;
-    }
-    const override = state.adminOverrides.profiles[adminId];
-    return {
-      ...profile,
-      __adminId: adminId,
-      ...(override || {}),
-    };
-  }).filter(Boolean);
+  const baseProfiles = Array.isArray(state.supabaseProfiles) ? state.supabaseProfiles : [];
+  return baseProfiles.map((profile, index) => ({
+    ...profile,
+    __adminId: profile.__adminId || profile.timestamp || profile.email || `${profile.firstName || "profile"}-${index}`,
+  }));
 }
 
 function getRowFieldValue(row, field) {
@@ -1283,12 +1372,17 @@ function getRowFieldValue(row, field) {
   return input.value;
 }
 
-function saveAdminIntakeRow(row) {
+async function saveAdminIntakeRow(row) {
   const id = row.dataset.adminRow;
   if (!id) return;
 
   const current = getMergedAdminIntakeRows().find((item) => (item.fingerprint || item.id) === id);
   if (!current) return;
+
+  if (!isSupabaseConfigured()) {
+    alert("Supabase non configurato: impossibile salvare.");
+    return;
+  }
 
   const updated = {
     ...current,
@@ -1306,38 +1400,86 @@ function saveAdminIntakeRow(row) {
     timestamp: getRowFieldValue(row, "timestamp").trim() || current.timestamp,
   };
 
-  state.adminOverrides.intake[id] = updated;
-  saveAdminOverrides();
-  state.sessionData = getMergedAdminIntakeRows();
+  const client = getSupabaseClient();
+  const payload = {
+    first_name: updated.firstName,
+    last_name: updated.lastName,
+    anon: Boolean(updated.anon),
+    session: updated.session,
+    media: updated.media,
+    score_type: updated.scoreType,
+    raw_score: updated.rawScore,
+    bocconi_score: updated.bocconiScore,
+    courses: updated.courses,
+    fingerprint: updated.fingerprint,
+  };
+
+  let query = client.from("intake_records").update(payload);
+  if (updated.__supabaseId) {
+    query = query.eq("id", updated.__supabaseId);
+  } else {
+    query = query.eq("fingerprint", current.fingerprint || updated.fingerprint);
+  }
+
+  const { error } = await query;
+  if (error) {
+    alert(`Salvataggio intake non riuscito: ${error.message}`);
+    return;
+  }
+
+  await loadSessionData();
+  updateSessionDashboard();
+  renderAdminPanel();
+}
+
+async function resetAdminIntakeRow() {
+  await loadSessionData();
   renderAdminPanel();
   updateSessionDashboard();
 }
 
-function resetAdminIntakeRow(row) {
+async function deleteAdminIntakeRow(row) {
   const id = row.dataset.adminRow;
   if (!id) return;
-  delete state.adminOverrides.intake[id];
-  saveAdminOverrides();
-  state.sessionData = getMergedAdminIntakeRows();
+
+  if (!isSupabaseConfigured()) {
+    alert("Supabase non configurato: impossibile eliminare.");
+    return;
+  }
+
+  const current = getMergedAdminIntakeRows().find((item) => (item.fingerprint || item.id) === id);
+  if (!current) return;
+
+  const client = getSupabaseClient();
+  let query = client.from("intake_records").delete();
+  if (current.__supabaseId) {
+    query = query.eq("id", current.__supabaseId);
+  } else {
+    query = query.eq("fingerprint", current.fingerprint);
+  }
+
+  const { error } = await query;
+  if (error) {
+    alert(`Eliminazione intake non riuscita: ${error.message}`);
+    return;
+  }
+
+  await loadSessionData();
   renderAdminPanel();
   updateSessionDashboard();
 }
 
-function deleteAdminIntakeRow(row) {
-  const id = row.dataset.adminRow;
-  if (!id) return;
-  delete state.adminOverrides.intake[id];
-  state.adminDeleted.intake[id] = true;
-  saveAdminOverrides();
-  saveAdminDeleted();
-  state.sessionData = getMergedAdminIntakeRows();
-  renderAdminPanel();
-  updateSessionDashboard();
-}
-
-function saveAdminProfileRow(row) {
+async function saveAdminProfileRow(row) {
   const id = row.dataset.adminProfileRow;
   if (!id) return;
+
+  if (!isSupabaseConfigured()) {
+    alert("Supabase non configurato: impossibile salvare.");
+    return;
+  }
+
+  const current = getMergedAdminProfiles().find((item) => item.__adminId === id);
+  if (!current) return;
 
   const updated = {
     firstName: getRowFieldValue(row, "firstName").trim(),
@@ -1349,104 +1491,79 @@ function saveAdminProfileRow(row) {
     timestamp: getRowFieldValue(row, "timestamp").trim(),
   };
 
-  state.adminOverrides.profiles[id] = updated;
-  saveAdminOverrides();
-  renderAdminPanel();
-}
-
-function resetAdminProfileRow(row) {
-  const id = row.dataset.adminProfileRow;
-  if (!id) return;
-  delete state.adminOverrides.profiles[id];
-  saveAdminOverrides();
-  renderAdminPanel();
-}
-
-function deleteAdminProfileRow(row) {
-  const id = row.dataset.adminProfileRow;
-  if (!id) return;
-
-  delete state.adminOverrides.profiles[id];
-  state.adminDeleted.profiles[id] = true;
-
-  const profiles = readStoredProfiles().filter((profile, index) => {
-    const profileId = profile.__adminId || profile.timestamp || profile.email || `${profile.firstName || "profile"}-${index}`;
-    return profileId !== id;
+  const client = getSupabaseClient();
+  let query = client.from("profiles").update({
+    first_name: updated.firstName,
+    last_name: updated.lastName,
+    email: updated.email,
+    nationality: updated.nationality,
+    target_course: updated.targetCourse,
+    phone: updated.phone,
   });
 
-  saveStoredProfiles(profiles);
-  saveAdminOverrides();
-  saveAdminDeleted();
+  if (current.__supabaseId) {
+    query = query.eq("id", current.__supabaseId);
+  } else {
+    query = query.eq("email", current.email);
+  }
+
+  const { error } = await query;
+  if (error) {
+    alert(`Salvataggio profilo non riuscito: ${error.message}`);
+    return;
+  }
+
+  await refreshAdminProfilesFromSupabase();
+  renderAdminPanel();
+}
+
+async function resetAdminProfileRow() {
+  await refreshAdminProfilesFromSupabase();
+  renderAdminPanel();
+}
+
+async function deleteAdminProfileRow(row) {
+  const id = row.dataset.adminProfileRow;
+  if (!id) return;
+
+  if (!isSupabaseConfigured()) {
+    alert("Supabase non configurato: impossibile eliminare.");
+    return;
+  }
+
+  const current = getMergedAdminProfiles().find((item) => item.__adminId === id);
+  if (!current) return;
+
+  const client = getSupabaseClient();
+  let query = client.from("profiles").delete();
+  if (current.__supabaseId) {
+    query = query.eq("id", current.__supabaseId);
+  } else {
+    query = query.eq("email", current.email);
+  }
+
+  const { error } = await query;
+  if (error) {
+    alert(`Eliminazione profilo non riuscita: ${error.message}`);
+    return;
+  }
+
+  await refreshAdminProfilesFromSupabase();
   renderAdminPanel();
 }
 
 function readStoredProfiles() {
-  const multi = localStorage.getItem("bocconiAccessProfiles");
-  if (multi) {
-    try {
-      const parsed = JSON.parse(multi);
-      if (Array.isArray(parsed)) {
-        return parsed
-          .map((profile, index) => ({
-            ...profile,
-            __adminId: profile.__adminId || profile.timestamp || profile.email || `${profile.firstName || "profile"}-${index}`,
-          }))
-          .filter((profile) => !state.adminDeleted.profiles[profile.__adminId]);
-      }
-    } catch (error) {
-      console.warn("Profili multipli non validi", error);
-    }
-  }
-
-  const single = localStorage.getItem("bocconiAccessProfile");
-  if (!single) return [];
-  try {
-    const parsed = JSON.parse(single);
-    const profile = {
-      ...parsed,
-      __adminId: parsed.__adminId || parsed.timestamp || parsed.email || `${parsed.firstName || "profile"}-0`,
-    };
-    return state.adminDeleted.profiles[profile.__adminId] ? [] : [profile];
-  } catch (error) {
-    console.warn("Profilo singolo non valido", error);
-    return [];
-  }
+  return [];
 }
 
-function saveStoredProfiles(profiles) {
-  if (!Array.isArray(profiles) || profiles.length === 0) {
-    localStorage.removeItem("bocconiAccessProfiles");
-    localStorage.removeItem("bocconiAccessProfile");
-    return;
-  }
-
-  const payload = profiles.map((profile) => {
-    const { __adminId, ...rest } = profile;
-    return {
-      ...rest,
-      __adminId,
-    };
-  });
-
-  localStorage.setItem("bocconiAccessProfiles", JSON.stringify(payload));
-  localStorage.setItem("bocconiAccessProfile", JSON.stringify(payload[0]));
+function saveStoredProfiles() {
+  // Persistenza locale dismessa.
 }
 
 /* Session results logic */
 function bootstrapSessionSubmissionFlag() {
-  try {
-    const cached = localStorage.getItem(SUBMISSION_KEY);
-    if (!cached) return;
-    const parsed = JSON.parse(cached);
-    state.sessionSubmitted = true;
-    state.sessionUserEntry = parsed;
-    if (parsed?.fingerprint) {
-      state.sessionFingerprint = parsed.fingerprint;
-      localStorage.setItem(FINGERPRINT_KEY, parsed.fingerprint);
-    }
-  } catch (error) {
-    console.warn("Impossibile ripristinare le submission locali", error);
-  }
+  state.sessionSubmitted = false;
+  state.sessionUserEntry = null;
 }
 
 function initResultsModal() {
@@ -1516,12 +1633,6 @@ async function hydrateFingerprint() {
     return state.sessionFingerprint;
   }
 
-  const stored = localStorage.getItem(FINGERPRINT_KEY);
-  if (stored) {
-    state.sessionFingerprint = stored;
-    return stored;
-  }
-
   try {
     const response = await fetch("https://api.ipify.org?format=json");
     if (response.ok) {
@@ -1535,64 +1646,59 @@ async function hydrateFingerprint() {
   if (!state.sessionFingerprint) {
     state.sessionFingerprint = `local-${Date.now()}`;
   }
-
-  localStorage.setItem(FINGERPRINT_KEY, state.sessionFingerprint);
   return state.sessionFingerprint;
 }
 
 async function loadSessionData() {
   state.sessionData = [];
+  state.sessionDataError = "";
 
   try {
     const remoteRows = await fetchSessionSheetData();
     state.sessionData = remoteRows;
   } catch (error) {
-    console.warn("Errore nel recupero dei dati dal foglio", error);
+    console.warn("Errore nel recupero dei dati da Supabase", error);
     state.sessionData = [];
+    state.sessionDataError = error.message || "Errore sconosciuto durante caricamento intake_records.";
     reportSessionError(error.message);
   }
 
-  appendLocalSubmission();
+  const ownRecord = state.sessionData.find((row) => row.fingerprint && row.fingerprint === state.sessionFingerprint);
+  state.sessionSubmitted = Boolean(ownRecord);
+  state.sessionUserEntry = ownRecord || null;
+
   state.sessionData = getMergedAdminIntakeRows();
+  const form = document.getElementById("sessionForm");
+  if (form && state.sessionSubmitted) {
+    lockSessionForm(form);
+  }
   renderAdminPanel();
   return state.sessionData;
 }
 
 async function fetchSessionSheetData() {
-  if (!SESSION_API_URL) {
-    throw new Error("Endpoint Google Sheet non configurato");
+  if (!isSupabaseConfigured()) {
+    throw new Error("Supabase non configurato");
   }
 
-  const response = await fetchWithCors(SESSION_API_URL, {
-    method: "GET",
-    headers: {
-      "Cache-Control": "no-cache",
-    },
-  });
+  const client = getSupabaseClient();
+  const { data, error } = await client
+    .from("intake_records")
+    .select("*")
+    .order("created_at", { ascending: false });
 
-  if (!response.ok) {
-    throw new Error(`Endpoint Google Sheet non disponibile (${response.status})`);
+  if (error) {
+    throw new Error(`Lettura intake_records fallita: ${error.message}`);
   }
 
-  const payload = await response.json();
-  const rows = Array.isArray(payload) ? payload : payload?.data;
-  if (!Array.isArray(rows)) {
-    return [];
-  }
-
+  const rows = Array.isArray(data) ? data : [];
   return rows
     .map((row, index) => normalizeSheetRow(row, index))
     .filter(Boolean);
 }
 
 function appendLocalSubmission() {
-  if (!(state.sessionSubmitted && state.sessionUserEntry)) {
-    return;
-  }
-  const exists = state.sessionData.some((row) => row.fingerprint === state.sessionUserEntry.fingerprint);
-  if (!exists) {
-    state.sessionData.push(state.sessionUserEntry);
-  }
+  // Persistenza locale dismessa.
 }
 
 function reportSessionError(message) {
@@ -1609,32 +1715,34 @@ function reportSessionError(message) {
 
 function normalizeSheetRow(row = {}, index = 0) {
   const media = parseFloat(row.media ?? row.gpa ?? row.Media ?? row.GPA);
-  const bocconiScore = parseFloat(row.bocconiScore ?? row.score ?? row.Score ?? row.rawScore);
+  const bocconiScore = parseFloat(row.bocconi_score ?? row.bocconiScore ?? row.score ?? row.Score ?? row.raw_score ?? row.rawScore);
   if (Number.isNaN(media) || Number.isNaN(bocconiScore)) {
     return null;
   }
 
-  const rawCourses = row.courses ?? row.coursePreferences ?? row.corsi ?? [];
+  const rawCourses = row.courses ?? row.course_preferences ?? row.coursePreferences ?? row.corsi ?? [];
   const courses = sanitizeCourses(rawCourses);
   const anonFlag = row.anon === true || row.anon === "true" || row.anon === 1;
-  const firstName = row.firstName || row.nome || "Profilo";
-  const lastName = row.lastName || row.cognome || "Community";
+  const firstName = row.first_name || row.firstName || row.nome || "Profilo";
+  const lastName = row.last_name || row.lastName || row.cognome || "Community";
+  const recordId = row.id || row.fingerprint || row.timestamp || `sheet-${index}`;
 
   return {
-    id: row.id || row.fingerprint || row.timestamp || `sheet-${index}`,
+    id: recordId,
     firstName,
     lastName,
     name: anonFlag ? "Profilo anonimo" : `${firstName} ${lastName}`.trim(),
     anon: anonFlag,
     session: row.session || row.sessione || "storico",
     media,
-    rawScore: parseFloat(row.rawScore ?? row.score ?? bocconiScore) || bocconiScore,
-    scoreType: row.scoreType || row.metric || "score",
+    rawScore: parseFloat(row.raw_score ?? row.rawScore ?? row.score ?? bocconiScore) || bocconiScore,
+    scoreType: row.score_type || row.scoreType || row.metric || "score",
     bocconiScore,
     combinedScore: computeScoreValue(media, bocconiScore),
     courses: courses.length ? courses : ["CORSO"],
-    timestamp: row.timestamp || new Date().toISOString(),
-    fingerprint: row.fingerprint || row.id || `sheet-${index}`,
+    timestamp: row.created_at || row.timestamp || new Date().toISOString(),
+    fingerprint: row.fingerprint || String(recordId),
+    __supabaseId: row.id || null,
   };
 }
 
@@ -1657,10 +1765,6 @@ function attachSessionForm() {
       state.sessionSubmitted = true;
       state.sessionUserEntry = record;
       state.sessionData.push(record);
-      localStorage.setItem(SUBMISSION_KEY, JSON.stringify(record));
-      if (record.fingerprint) {
-        localStorage.setItem(FINGERPRINT_KEY, record.fingerprint);
-      }
       await persistSubmissionSheet(record);
       if (feedback) {
         feedback.textContent = "Dati registrati correttamente. Dashboard sbloccata.";
@@ -1978,48 +2082,27 @@ function getCourseAggregates(entries) {
 }
 
 async function persistSubmissionSheet(entry) {
-  if (!SESSION_API_URL) {
-    console.warn("Nessun endpoint Google Sheet configurato: salto la persistenza remota.");
-    return;
+  if (!isSupabaseConfigured()) {
+    throw new Error("Supabase non configurato: impossibile salvare i dati sessione.");
   }
 
+  const client = getSupabaseClient();
   const payload = {
-    timestamp: entry.timestamp,
-    firstName: entry.firstName,
-    lastName: entry.lastName,
+    first_name: entry.firstName,
+    last_name: entry.lastName,
     anon: entry.anon,
     session: entry.session,
     media: entry.media,
-    scoreType: entry.scoreType,
-    rawScore: entry.rawScore,
-    bocconiScore: entry.bocconiScore,
+    score_type: entry.scoreType,
+    raw_score: entry.rawScore,
+    bocconi_score: entry.bocconiScore,
     courses: entry.courses,
-    fingerprint: entry.fingerprint,
+    created_at: entry.timestamp,
   };
 
-  try {
-    const formPayload = new URLSearchParams();
-    Object.entries(payload).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        formPayload.append(key, value.join("|"));
-      } else if (typeof value === "boolean") {
-        formPayload.append(key, value ? "true" : "false");
-      } else {
-        formPayload.append(key, value ?? "");
-      }
-    });
-
-    const response = await fetchWithCors(SESSION_API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-      body: formPayload.toString(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Persistenza sheet fallita: ${response.status}`);
-    }
-  } catch (error) {
-    console.warn("Scrittura Google Sheet non riuscita", error);
+  const { error } = await client.from("intake_records").insert([payload]);
+  if (error) {
+    throw new Error(`Salvataggio intake_records fallito: ${error.message}`);
   }
 }
 
